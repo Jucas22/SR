@@ -23,6 +23,10 @@ Usar datos de training para rellenar el vector de preferencias del usuario, y lu
 
 **Lista de recomendaciones: (futuras partes)** sera una lista de peliculas que el usuario no ha visto y se le recomienda ver, ordenada por probabilidad o por algun cirterio de relevancia. Esta lista se le pasará tal cual a la UI y esta ya mostrará las peliculas al usuario, con la informcaion que necesite.
 
+TODO: Ya se pede empezar a hacer la interfaz para generar nuevo usuario
+
+TODO: Generar las fichas de usuario de la DB (creo que esto con el archivo de usuarios ya esta perfe, pero hay que revisarlo)
+
 ### Lo que se ha realizado:
 
 #### 1. **Limpieza y Transformación de Datos**
