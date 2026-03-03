@@ -3,6 +3,7 @@ import sys
 import json
 import pandas as pd
 from pathlib import Path
+import os
 
 # Agregar el directorio backend al path
 sys.path.append(str(Path(__file__).parent.parent / "Backend"))
@@ -20,11 +21,10 @@ class NetflixApp:
         self.user_manager = UserRegistryManager()
         self.data_path = Path(__file__).parent.parent / "Data" / "Clean_data"
         self.raw_data_path = Path(__file__).parent.parent / "Data" / "Raw_data"
+        self.posters_path = Path(__file__).parent.parent / "Data" / "posters"
 
         # Cargar datos de películas
         self.movies = self._load_movies()
-        self.movie_ratings = self._load_movie_ratings()
-        self.movie_stats = self._load_movie_stats()
 
         # Mapeo de géneros
         self.genre_mapping = self._load_genre_mapping()
@@ -33,7 +33,7 @@ class NetflixApp:
         """Cargar datos de películas"""
         try:
             with open(
-                self.data_path / "peliculas_clean.json", "r", encoding="utf-8"
+                self.data_path / "cleaned_movies.json", "r", encoding="utf-8"
             ) as f:
                 movies_list = json.load(f)
                 # Convertir lista a diccionario usando id como clave
@@ -41,28 +41,6 @@ class NetflixApp:
                 return movies_dict
         except Exception as e:
             st.error(f"Error cargando películas: {e}")
-            return {}
-
-    def _load_movie_ratings(self):
-        """Cargar ratings por película"""
-        try:
-            with open(
-                self.data_path / "ratings_por_pelicula.json", "r", encoding="utf-8"
-            ) as f:
-                return json.load(f)
-        except Exception as e:
-            st.error(f"Error cargando ratings: {e}")
-            return {}
-
-    def _load_movie_stats(self):
-        """Cargar estadísticas de películas"""
-        try:
-            with open(
-                self.data_path / "estadisticas_peliculas.json", "r", encoding="utf-8"
-            ) as f:
-                return json.load(f)
-        except Exception as e:
-            st.error(f"Error cargando estadísticas: {e}")
             return {}
 
     def _load_genre_mapping(self):
@@ -83,6 +61,31 @@ class NetflixApp:
         if isinstance(genre_ids, list):
             return [self.genre_mapping.get(gid, f"Género {gid}") for gid in genre_ids]
         return []
+
+    def _get_poster_path(self, movie_id, movie_data):
+        """Buscar el path del poster local para una película"""
+        try:
+            # Obtener el ID original de la película desde los datos
+            original_id = movie_data.get("imdb_id", movie_id)
+            # Asegurar que sea string para consistencia
+            original_id_str = str(original_id)
+            # Remover prefijo "tt" y ceros iniciales
+            original_id_str = original_id_str.replace("tt", "").lstrip("0")
+
+            print(
+                f"Buscando poster para película ID: {movie_id} (original ID: {original_id_str})"
+            )
+
+            # Intentar con el ID original primero
+            for poster_file in self.posters_path.glob(f"*_{original_id_str}.jpg"):
+                print(f"Poster encontrado con original_id: {poster_file}")
+                return str(poster_file)
+
+            print(f"No se encontró poster")
+            return None
+        except Exception as e:
+            st.error(f"Error buscando poster para película {movie_id}: {e}")
+            return None
 
     def login_interface(self):
         """Interfaz de inicio de sesión"""
@@ -130,7 +133,7 @@ class NetflixApp:
             "Selecciona tu usuario:", options=list(user_options.keys())
         )
 
-        if st.button("🚀 Iniciar Sesión", type="primary", use_container_width=True):
+        if st.button("🚀 Iniciar Sesión", type="primary", width="stretch"):
             selected_user_id = user_options[selected_user_display]
             st.session_state.logged_in = True
             st.session_state.user_id = selected_user_id
@@ -158,7 +161,7 @@ class NetflixApp:
         else:
             favorite_genres = []
 
-        if st.button("✨ Crear Usuario", type="primary", use_container_width=True):
+        if st.button("✨ Crear Usuario", type="primary", width="stretch"):
             try:
                 # Crear preferencias del usuario
                 user_preferences = {
@@ -224,7 +227,7 @@ class NetflixApp:
 
             st.markdown("---")
 
-            if st.button("🚪 Cerrar Sesión", use_container_width=True):
+            if st.button("🚪 Cerrar Sesión", width="stretch"):
                 # Limpiar sesión
                 for key in ["logged_in", "user_id", "user_data"]:
                     if key in st.session_state:
@@ -320,6 +323,21 @@ class NetflixApp:
                             st.success(f"Rating guardado: {user_rating} ⭐")
 
                     with col2:
+                        # Poster de la película
+                        local_poster_path = self._get_poster_path(movie_id, movie_data)
+                        if local_poster_path:
+                            try:
+                                st.image(
+                                    local_poster_path,
+                                    caption=f"Poster: {movie_data.get('titulo', 'Sin título')}",
+                                    width="content",
+                                )
+                            except Exception as e:
+                                st.warning(f"Error cargando poster: {e}")
+                                st.write(f"**Poster path:** {local_poster_path}")
+                        else:
+                            st.write("🎬 *Sin poster disponible*")
+
                         # Estadísticas de la película
                         rating_stats = movie_data.get("rating_stats", {})
                         if rating_stats:
@@ -330,11 +348,6 @@ class NetflixApp:
                                 "Promedio Usuarios",
                                 f"{rating_stats.get('avg_rating', 0):.1f}⭐",
                             )
-
-                        # Poster (si está disponible)
-                        poster_path = movie_data.get("poster_path")
-                        if poster_path:
-                            st.write(f"**Poster:** {poster_path}")
 
                 count += 1
         else:
