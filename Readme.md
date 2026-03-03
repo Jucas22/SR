@@ -38,3 +38,7 @@ Ratings de test: 9902
 Total: 32016 (original: 32016)
 Guardado: Data/Clean_data/train_ratings.json
 Guardado: Data/Clean_data/test_ratings.json
+
+
+Que se a a;adido al trabajo original:
+    - Se ha actualizado la info de las pelis y se ha a;adido mas campos como el overwiew, produccion, y algunas cosas mas
