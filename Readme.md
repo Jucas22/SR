@@ -109,12 +109,114 @@ test_ratings = pd.read_csv('Data_set/test_ratings.csv')
 # 3. Calcular métricas (MAE, RMSE, etc.)
 ```
 
-#### 5. **Estadísticas del Dataset Procesado**
+#### 5. **Gestión de Usuarios del Sistema**
+
+**Script:** `user_registry_manager.py`
+**Archivo de registro:** `Data_set/user_registry.json`
+
+**⚠️ IMPORTANTE:** Los archivos existentes (`ratings_por_usuario.json`, etc.) están optimizados para **análisis de datos y entrenamiento**, pero NO para **gestión dinámica de usuarios en producción**.
+
+##### **¿Por qué necesitas un registro adicional de usuarios?**
+
+Los archivos actuales tienen limitaciones para un sistema real:
+
+- ❌ **Solo análisis:** Diseñados para analizar usuarios del dataset histórico
+- ❌ **Sin metadata:** No tienen información de estado, fechas de creación, preferencias explícitas
+- ❌ **No escalable:** No permite agregar nuevos usuarios fácilmente
+- ❌ **Sin gestión:** No distinguish entre usuarios existentes vs. nuevos
+
+##### **✅ Solución: Sistema de Registro de Usuarios**
+
+**Funcionalidades del `UserRegistryManager`:**
+
+- 🆔 **Gestión de IDs únicos:** Genera nuevos IDs de usuario automáticamente
+- 👥 **Tipos de usuario:** Distingue entre usuarios originales del dataset y nuevos usuarios
+- 📊 **Estadísticas:** Tracking de actividad, ratings promedio, películas vistas
+- 🔄 **Estados:** Usuarios activos/inactivos
+- 📅 **Metadata temporal:** Fechas de creación, última actividad
+- ⚙️ **Preferencias:** Géneros favoritos, configuraciones personalizadas
+
+##### **Estructura del registro:**
+
+```json
+{
+  "metadata": {
+    "last_user_id": 672,
+    "total_users": 672,
+    "active_users": 672,
+    "created_date": "2026-03-03"
+  },
+  "users": {
+    "1": {
+      "user_id": 1,
+      "status": "active",
+      "user_type": "existing", // "existing" o "new"
+      "total_ratings": 5,
+      "preferences": {
+        "favorite_genres": ["Action", "Sci-Fi"],
+        "watched_movies": [1371, 1405, 2105]
+      },
+      "statistics": {
+        "avg_rating": 2.3,
+        "rating_count": 5
+      }
+    }
+  }
+}
+```
+
+##### **Uso del UserRegistryManager:**
+
+```python
+from user_registry_manager import UserRegistryManager
+
+# Inicializar gestor
+user_manager = UserRegistryManager()
+
+# Crear nuevo usuario
+new_user_id = user_manager.create_new_user({
+    "favorite_genres": ["Action", "Comedy"],
+    "watched_movies": []
+})
+
+# Verificar existencia
+if user_manager.user_exists(user_id):
+    user_info = user_manager.get_user(user_id)
+
+# Actualizar actividad después de nuevo rating
+user_manager.update_user_activity(
+    user_id=673,
+    new_rating_count=5,
+    new_avg_rating=4.2,
+    watched_movies=[1, 2, 3, 4, 5]
+)
+
+# Obtener estadísticas
+stats = user_manager.get_statistics()
+```
+
+##### **Flujo de trabajo recomendado:**
+
+1. **Para usuarios existentes (dataset original):**
+   - Usar `train_ratings_por_usuario.json` para entrenar modelo
+   - Registrar en `user_registry.json` con `user_type: "existing"`
+
+2. **Para nuevos usuarios (registro en la app):**
+   - Crear con `user_manager.create_new_user()`
+   - Capturar preferencias explícitas en el registro
+   - Usar sistema de recomendaciones para cold-start
+
+3. **Para recomendaciones activas:**
+   - Consultar `user_registry.json` para obtener perfil completo
+   - Combinar con datos históricos de ratings
+   - Actualizar actividad después de cada interacción
+
+#### 6. **Estadísticas del Dataset Procesado**
 
 - **Películas procesadas:** 27,841
 - **Ratings válidos totales:** 32,016
 - **Ratings de entrenamiento:** 22,114 (69.1%)
 - **Ratings de test:** 9,902 (30.9%)
-- **Usuarios únicos:** 670
+- **Usuarios únicos del dataset:** 670
 - **Películas con keywords:** Variable según disponibilidad
 - **Géneros únicos:** Multiple IDs de géneros disponibles
