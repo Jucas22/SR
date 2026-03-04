@@ -39,7 +39,7 @@ def save_json_data(data, filename, indent=2):
 BASE_URL = "https://api.themoviedb.org/3/movie/{id}?language=en-US"
 HEADERS = {
     "accept": "application/json",
-    "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI0N2QxZWI0ZDYzYWVmNDVmOTczN2U4OWMwNWQ1YTA5MiIsIm5iZiI6MTc3MjU3MDY4OC4xNDMwMDAxLCJzdWIiOiI2OWE3NDg0MDBkZDc0MDUxNGY2NjJkMDciLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.ZtjNK_NMHOYY4qVlz3ozR7xxUJp80e2yDIe-HrQFFfI",
+    "Authorization": "....",
 }
 
 # Archivo de progreso para continuar desde donde se quedó si hay errores
