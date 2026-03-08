@@ -10,18 +10,36 @@ class UserRegistryManager:
     Permite crear, actualizar, eliminar y consultar usuarios.
     """
 
-    def __init__(self, registry_path: str = "Data/user_registry.json"):
+    def __init__(self, registry_path: Optional[str] = None):
         """
         Inicializa el gestor de registro de usuarios.
 
         Args:
-            registry_path: Ruta al archivo JSON de registro de usuarios
+            registry_path: Ruta al archivo JSON de registro de usuarios. Si no se
+                proporciona, se utilizará el archivo dentro del directorio
+                `Data` relativo al proyecto.
         """
-        self.registry_path = registry_path
+        # Resolver ruta base del proyecto (carpeta padre de Backend)
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+        if registry_path:
+            # los caminos relativos se interpretan respecto al directorio base
+            if not os.path.isabs(registry_path):
+                registry_path = os.path.join(base_dir, registry_path)
+        else:
+            registry_path = os.path.join(base_dir, "Data", "user_registry.json")
+
+        # Asegurar que usamos un path absoluto
+        self.registry_path = os.path.abspath(registry_path)
         self.users_data = self._load_registry()
 
     def _load_registry(self) -> Dict[str, Any]:
         """Carga el registro de usuarios desde el archivo JSON."""
+        # Asegurar que el directorio del registro existe
+        dirpath = os.path.dirname(self.registry_path)
+        if dirpath and not os.path.exists(dirpath):
+            os.makedirs(dirpath, exist_ok=True)
+
         if os.path.exists(self.registry_path):
             with open(self.registry_path, "r", encoding="utf-8") as file:
                 return json.load(file)
@@ -39,7 +57,10 @@ class UserRegistryManager:
             }
 
     def _save_registry(self):
-        """Guarda el registro de usuarios en el archivo JSON."""
+        """Guarda el registro de usuarios en el archivo JSON."""        # Asegurar que el directorio exista antes de escribir
+        dirpath = os.path.dirname(self.registry_path)
+        if dirpath and not os.path.exists(dirpath):
+            os.makedirs(dirpath, exist_ok=True)
         self.users_data["metadata"]["last_updated"] = datetime.now().strftime(
             "%Y-%m-%d"
         )
