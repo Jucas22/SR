@@ -2,10 +2,10 @@ import streamlit as st
 import sys
 from pathlib import Path
 
-# Agregar el directorio backend al path
-sys.path.append(str(Path(__file__).parent.parent / "Backend"))
+# # Agregar el directorio backend al path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from user_registry_manager import UserRegistryManager
+from Backend.user_registry_manager import UserRegistryManager
 
 
 class AuthManager:

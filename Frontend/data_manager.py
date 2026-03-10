@@ -2,13 +2,21 @@ import json
 import pandas as pd
 from pathlib import Path
 import streamlit as st
+import sys
+import traceback
 
 import requests
+
+# Agregar el directorio backend al path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from Backend.content_recommender import ContentBasedRecommender
+from Backend.user_registry_manager import UserRegistryManager
 
 
 class DataManager:
     """
-    Gestor de datos para cargar y manejar películas, géneros y posters
+    Gestor de datos para cargar y manejar películas, géneros, posters y recomendaciones
     """
 
     def __init__(self):
@@ -17,9 +25,14 @@ class DataManager:
         self.raw_data_path = Path(__file__).parent.parent / "Data" / "Raw_data"
         self.posters_path = Path(__file__).parent.parent / "Data" / "posters"
         self.base_poster_path = "https://image.tmdb.org/t/p/original"
+        
         # Cargar datos
         self.movies = self._load_movies()
         self.genre_mapping = self._load_genre_mapping()
+        
+        # Inicializar recomendador
+        self.recommender = self._initialize_recommender()
+        self.user_registry_manager = UserRegistryManager()
 
     def _load_movies(self):
         """Cargar datos de películas"""
@@ -48,6 +61,108 @@ class DataManager:
             st.error(f"Error cargando géneros: {e}")
             return {}
 
+    def _initialize_recommender(self):
+        """Inicializar y entrenar el recomendador basado en contenido"""
+        try:
+            recommender = ContentBasedRecommender(
+                categorical_columns=["generos"],
+                feature_text_columns=["overview", "tagline", "keywords", "tags", "cast", "crew", "director"],
+                rating_threshold_like=3.5,
+                profile_strategy="weighted",
+                use_registry_history_for_cold_start=True,
+                recency_weighting=False,  # Desactivar para evitar problemas con pesos
+                quality_weight=0.05,  # Reducir peso
+                popularity_weight=0.02,  # Reducir peso
+                diversity_penalty=0.10,
+                min_df=1,
+                max_tfidf_features=500,  # Reducir features
+            )
+            
+            # Convertir movies dict a DataFrame para el recomendador
+            movies_list = list(self.movies.values())
+            if not movies_list:
+                st.warning("⚠️ No hay películas cargadas. El recomendador no se puede inicializar.")
+                return None
+                
+            movies_df = pd.DataFrame(movies_list)
+            
+            # Asegurarse que las columnas necesarias existen
+            if "id" in movies_df.columns:
+                movies_df = movies_df.rename(columns={"id": "movieId"})
+            elif "movieId" not in movies_df.columns:
+                movies_df["movieId"] = range(len(movies_df))
+            
+            # Asegurar que movieId es entero
+            movies_df["movieId"] = movies_df["movieId"].astype(int)
+            
+            # Asegurar que las columnas de características existen (aunque estén vacías)
+            required_cols = ["generos", "overview", "tagline", "keywords", "tags", "cast", "crew", "director", "title"]
+            for col in required_cols:
+                if col not in movies_df.columns:
+                    movies_df[col] = ""
+            
+            # Fillna con strings vacíos para evitar problemas
+            text_cols = ["overview", "tagline", "keywords", "tags", "cast", "crew", "director"]
+            for col in text_cols:
+                movies_df[col] = movies_df[col].fillna("").astype(str)
+            
+            # Asegurar que generos es lista
+            if "generos" in movies_df.columns:
+                movies_df["generos"] = movies_df["generos"].apply(
+                    lambda x: x if isinstance(x, list) else ([] if pd.isna(x) else [x])
+                )
+            
+            # Cargar ratings si existen
+            ratings_df = None
+            ratings_path = self.data_path / "train_ratings.json"
+            if ratings_path.exists():
+                try:
+                    with open(ratings_path, "r", encoding="utf-8") as f:
+                        ratings_data = json.load(f)
+                        if ratings_data:
+                            ratings_df = pd.DataFrame(ratings_data)
+                            # Asegurar tipos de datos
+                            if not ratings_df.empty:
+                                if "userId" in ratings_df.columns:
+                                    ratings_df["userId"] = ratings_df["userId"].astype(int)
+                                if "movieId" in ratings_df.columns:
+                                    ratings_df["movieId"] = ratings_df["movieId"].astype(int)
+                                if "rating" in ratings_df.columns:
+                                    ratings_df["rating"] = pd.to_numeric(ratings_df["rating"], errors="coerce")
+                                # Remover NaN
+                                ratings_df = ratings_df.dropna(subset=["rating"])
+                except Exception as e:
+                    st.info(f"⚠️ Info: No se pudieron cargar ratings ({str(e)[:50]})")
+                    ratings_df = None
+            
+            # Cargar user_registry
+            user_registry_path = Path(__file__).parent.parent / "Data" / "user_registry.json"
+            user_registry = None
+            if user_registry_path.exists():
+                try:
+                    with open(user_registry_path, "r", encoding="utf-8") as f:
+                        user_registry = json.load(f)
+                except Exception as e:
+                    st.info(f"⚠️ Info: No se pudo cargar user_registry ({str(e)[:50]})")
+                    user_registry = None
+            
+            print(f"🔧 Entrenando recomendador con {len(movies_df)} películas...")
+            if ratings_df is not None:
+                print(f"   - {len(ratings_df)} ratings cargados")
+            
+            # Entrenar el recomendador
+            recommender.fit(movies_df, ratings=ratings_df, user_registry=user_registry)
+            st.success("✅ Recomendador inicializado correctamente")
+            return recommender
+            
+        except Exception as e:
+            error_msg = str(e)
+            st.error(f"❌ Error: {error_msg[:100]}")
+            print(f"❌ Error completo: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     def get_genre_names(self, genre_ids):
         """Convertir IDs de géneros a nombres"""
         if isinstance(genre_ids, list):
@@ -55,19 +170,21 @@ class DataManager:
         return []
 
     def obtener_datos_pelicula(self, nombre_pelicula):
-        params = {
-            "api_key": st.secrets["TMDB_API_KEY"],
-            "query": nombre_pelicula,
-            "language": "es-ES",  # Para que el título y sinopsis estén en español
-        }
-
-        response = requests.get(self.base_poster_path, params=params)
-        datos = response.json()
-
-        # Verificamos si hay resultados
-        if datos["results"]:
-            # Tomamos el primer resultado (el más relevante)
-            return datos["results"][0]
+        """Buscar datos de una película en TMDb (uso opcional)"""
+        try:
+            base_url = "https://api.themoviedb.org/3/search/movie"
+            params = {
+                "api_key": st.secrets.get("TMDB_API_KEY", ""),
+                "query": nombre_pelicula,
+                "language": "es-ES",
+            }
+            response = requests.get(base_url, params=params, timeout=5)
+            datos = response.json()
+            
+            if datos.get("results"):
+                return datos["results"][0]
+        except Exception:
+            pass
         return None
 
     def get_poster_url(self, movie_id, movie_data):
@@ -168,3 +285,96 @@ class DataManager:
     def get_movie_count(self):
         """Obtener el número total de películas"""
         return len(self.movies)
+
+    def get_recommendations(self, user_id, top_k=10, exclude_seen=True):
+        """
+        Obtener recomendaciones personalizadas para un usuario
+        
+        Args:
+            user_id: ID del usuario
+            top_k: Número de recomendaciones a devolver
+            exclude_seen: Si True, excluye películas ya vistas
+            
+        Returns:
+            DataFrame con recomendaciones o None si hay error
+        """
+        if self.recommender is None:
+            return None
+        
+        try:
+            recommendations_df = self.recommender.recommend(
+                user_id=user_id,
+                top_k=top_k,
+                exclude_seen=exclude_seen,
+                return_df=True
+            )
+            return recommendations_df
+        except Exception as e:
+            st.warning(f"No se pudieron generar recomendaciones para este usuario: {e}")
+            return None
+
+    def get_recommendation_explanation(self, user_id, movie_id):
+        """
+        Obtener explicación de por qué se recomienda una película
+        
+        Args:
+            user_id: ID del usuario
+            movie_id: ID de la película
+            
+        Returns:
+            Lista de textos explicativos
+        """
+        if self.recommender is None:
+            return []
+        
+        try:
+            return self.recommender.explain_recommendation(user_id, movie_id, top_n_reasons=3)
+        except Exception:
+            return []
+
+    def update_user_rating(self, user_id, movie_id, rating):
+        """
+        Actualizar el rating de un usuario para una película
+        
+        Args:
+            user_id: ID del usuario
+            movie_id: ID de la película
+            rating: Calificación (0-5 típicamente)
+        """
+        if self.recommender is None:
+            st.error("❌ El recomendador no está inicializado")
+            return False
+        
+        try:
+            # Convertir a tipos correctos
+            user_id = int(user_id)
+            movie_id = int(movie_id)
+            rating = float(rating)
+            
+            # Actualizar en el recomendador
+            self.recommender.update_user_profile(user_id, movie_id, rating)
+            
+            # Obtener películas vistas actuales
+            user_data = self.user_registry_manager.get_user(user_id)
+            watched_movies = user_data.get("preferences", {}).get("watched_movies", []) if user_data else []
+            
+            # Asegurar que todos los IDs son enteros
+            watched_movies = [int(m) for m in watched_movies]
+            
+            # Agregar la película si no está ya
+            if movie_id not in watched_movies:
+                watched_movies.append(movie_id)
+            
+            # Actualizar en el registry del usuario
+            ratings_count = len(watched_movies)
+            self.user_registry_manager.update_user_activity(
+                user_id,
+                new_rating_count=ratings_count,
+                watched_movies=watched_movies
+            )
+            return True
+        except Exception as e:
+            error_msg = str(e)
+            st.error(f"❌ Error actualizando rating: {error_msg}")
+            traceback.print_exc()
+            return False

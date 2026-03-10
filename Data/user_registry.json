@@ -1,10 +1,10 @@
 {
   "metadata": {
-    "last_user_id": 671,
-    "total_users": 670,
-    "active_users": 670,
+    "last_user_id": 672,
+    "total_users": 671,
+    "active_users": 671,
     "created_date": "2026-03-03",
-    "last_updated": "2026-03-03"
+    "last_updated": "2026-03-08"
   },
   "users": {
     "1": {
@@ -47431,6 +47431,30 @@
         "test_ratings": 11,
         "train_percentage": 69.4,
         "test_percentage": 30.6
+      }
+    },
+    "672": {
+      "user_id": 672,
+      "name": "Jaime Pérez",
+      "status": "active",
+      "created_date": "2026-03-08",
+      "last_activity": "2026-03-08",
+      "total_ratings": 0,
+      "user_type": "new",
+      "preferences": {
+        "favorite_genres": [
+          "Acción",
+          "Aventura",
+          "Ciencia ficción",
+          "Comedia",
+          "Terror"
+        ],
+        "watched_movies": []
+      },
+      "statistics": {
+        "avg_rating": 0.0,
+        "rating_count": 0,
+        "active_since": "2026-03-08"
       }
     }
   }
