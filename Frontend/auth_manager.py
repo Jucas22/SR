@@ -125,8 +125,8 @@ class AuthManager:
 
     def logout(self):
         """Cerrar sesión del usuario actual"""
-        # Limpiar sesión
-        for key in ["logged_in", "user_id", "user_data"]:
+        # Limpiar sesión (incluimos el flag del recomendador)
+        for key in ["logged_in", "user_id", "user_data", "use_content_recommender"]:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
