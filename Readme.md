@@ -35,7 +35,7 @@ TODO: Generar las fichas de usuario de la DB (creo que esto con el archivo de us
     3. El peso de cada rating positivo es $w_{u,i} = r_{u,i} - \bar{r}_u$ y se distribuye equitativamente entre los géneros $G_i$ de la película: cada género recibe $\frac{w_{u,i}}{|G_i|}$.
     4. Para cada género $g$ se calcula la afinidad media: $a_{u,g} = \frac{\sum_{i: g \in G_i} w_{u,i}/|G_i|}{|\{i : g \in G_i\}|}$
     5. Se normaliza a [0, 100]: $v_{u,g} = \frac{a_{u,g}}{\max_g(a_{u,g})} \times 100$
-    - Se usan solo valores positivos [0, 100] porque así la similitud coseno queda acotada a [0, 1] (interpretable como porcentaje de afinidad), se evita la cancelación entre géneros, y es consistente con los pesos TF-IDF no-negativos del espacio de ítems.
+    - Se usan solo valores positivos [0, 100] porque así la similitud coseno queda acotada a [0, 1] (interpretable como porcentaje de afinidad), se evita la cancelación entre géneros, y es consistente con los pesos TF-IDF no-negativos del espacio de ítems
 - **enhanced_movies.json:** un fichero con la informacion de cada pelicula, con su id, su genero, su titulo, su sinopsis, etc. Este fichero se usará posteriormente para recomendar peliculas a los usuarios. En este fichero se ha añadido mas informacion que en el cleaned_movies.json, como el overview, la produccion, etc.
 
 ### Lo que se ha realizado:
