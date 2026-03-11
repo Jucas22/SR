@@ -1,3 +1,5 @@
 pandas
 streamlit
 requests
+scipy
+scikit-learn
