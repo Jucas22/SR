@@ -95,7 +95,7 @@ class ContentBasedRecommender:
             "crew",
             "director",
         ])
-        self.categorical_columns = list(categorical_columns or ["genres"])
+        self.categorical_columns = list(categorical_columns or ["generos"])
 
         self.rating_threshold_like = rating_threshold_like
         self.profile_strategy = profile_strategy
@@ -383,7 +383,7 @@ class ContentBasedRecommender:
         target_row = self.movies.iloc[target_idx]
 
         reduced_genres = self.get_reduced_user_genre_preferences(user_id)
-        target_genres = self._safe_split_multi_value(target_row.get("genres", []))
+        target_genres = self._safe_split_multi_value(target_row.get("generos", []))
         target_genres_norm = [self._canonicalize_genre(g) for g in target_genres]
 
         common_genres = [g for g in reduced_genres.keys() if g in target_genres_norm]
@@ -507,8 +507,8 @@ class ContentBasedRecommender:
             if col in movies.columns:
                 movies[col] = movies[col].apply(self._normalize_multi_value_field)
 
-        if "genres" in movies.columns:
-            movies["genres"] = movies["genres"].apply(
+        if "generos" in movies.columns:
+            movies["generos"] = movies["generos"].apply(
                 lambda vals: [self._canonicalize_genre(v) for v in self._safe_split_multi_value(vals)]
             )
 
@@ -571,12 +571,12 @@ class ContentBasedRecommender:
             if encoded.size > 0 and len(mlb.classes_) > 0:
                 start = len(feature_names)
                 matrices.append(sparse.csr_matrix(encoded.astype(float)))
-                names = [f"{col}::{self._canonicalize_genre(cls) if col == 'genres' else str(cls).lower()}"
+                names = [f"{col}::{self._canonicalize_genre(cls) if col == 'generos' else str(cls).lower()}"
                          for cls in mlb.classes_]
                 feature_names.extend(names)
                 end = len(feature_names)
 
-                if col == "genres":
+                if col == "generos":
                     self.genre_columns_ = names
                     self.genre_feature_idx_ = list(range(start, end))
 
@@ -713,7 +713,7 @@ class ContentBasedRecommender:
 
         found_any = False
         for genre, weight in reduced.items():
-            key = f"genres::{self._canonicalize_genre(genre)}"
+            key = f"generos::{self._canonicalize_genre(genre)}"
             if key in feature_index:
                 profile[feature_index[key]] = float(weight)
                 found_any = True
@@ -979,7 +979,7 @@ class ContentBasedRecommender:
 
 if __name__ == "__main__":
     recommender = ContentBasedRecommender(
-        categorical_columns=["genres"],
+        categorical_columns=["generos"],
         feature_text_columns=["overview", "keywords", "tags"],
         profile_strategy="weighted",
         min_reduced_genres=5,
