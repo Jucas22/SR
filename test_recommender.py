@@ -19,7 +19,7 @@ def test_recommender():
 
     # Cargar movies
     data_path = Path(__file__).parent / "Data" / "Clean_data"
-    movies_path = data_path / "cleaned_movies.json"
+    movies_path = data_path / "enhanced_movies.json"
 
     print(f"\n📁 Buscando películas en: {movies_path}")
     if not movies_path.exists():
@@ -88,33 +88,22 @@ def test_recommender():
 
     try:
         recommender = ContentBasedRecommender(
-            categorical_columns=["generos"],
-            feature_text_columns=[
-                "overview",
-                "tagline",
-                "keywords",
-                "tags",
-                "cast",
-                "crew",
-                "director",
-            ],
-            rating_threshold_like=3.5,
+            categorical_columns=["genres"],
+            feature_text_columns=["overview", "keywords", "tags"],
             profile_strategy="weighted",
-            use_registry_history_for_cold_start=True,
-            recency_weighting=False,
-            quality_weight=0.05,
-            popularity_weight=0.02,
-            diversity_penalty=0.10,
-            # match DataManager settings to replicate environment
-            min_df=1,
-            max_tfidf_features=500,
+            min_reduced_genres=5,
+            max_reduced_genres=8,
+            w_genre=0.60,
+            w_text=0.25,
+            w_quality=0.10,
+            w_popularity=0.05,
         )
         # end of recommender initialization
 
         print(f"✅ Recomendador creado")
         print(f"\n🔧 Llamando a fit()...")
 
-        recommender.fit(movies_df, ratings=None, user_registry=None)
+        recommender.fit(movies_df, ratings=ratings_df, user_registry=user_registry)
 
         print(f"✅ fit() completado exitosamente")
         print(f"\n📈 Matriz de características:")

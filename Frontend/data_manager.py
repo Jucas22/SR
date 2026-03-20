@@ -30,8 +30,8 @@ class DataManager:
         self.movies = self._load_movies()
         self.genre_mapping = self._load_genre_mapping()
         
-        # Inicializar recomendador
-        self.recommender = self._initialize_recommender()
+        # Inicializar campos; el recomendador se crea más tarde bajo demanda
+        self.recommender = None
         self.user_registry_manager = UserRegistryManager()
 
     def _load_movies(self):
@@ -71,8 +71,8 @@ class DataManager:
                 profile_strategy="weighted",
                 use_registry_history_for_cold_start=True,
                 recency_weighting=False,  # Desactivar para evitar problemas con pesos
-                quality_weight=0.05,  # Reducir peso
-                popularity_weight=0.02,  # Reducir peso
+                w_quality=0.05,  # Reducir peso
+                w_popularity=0.02,  # Reducir peso
                 diversity_penalty=0.10,
                 min_df=1,
                 max_tfidf_features=500,  # Reducir features
@@ -213,6 +213,19 @@ class DataManager:
         except Exception:
             return "https://via.placeholder.com/300x450/1a1a2e/e0e0e0?text=Error", True
 
+    def ensure_recommender_initialized(self):
+        """Crea y entrena el recomendador si aún no existe.
+
+        Este método puede ser llamado varias veces de forma segura: si el
+        recomendador ya está preparado no hace nada. Está pensado para ser
+        invocado desde la interfaz cuando el usuario solicita recomendaciones.
+        """
+        if self.recommender is not None:
+            return
+        # utilizar spinner para feedback visual
+        with st.spinner("🔧 Inicializando motor de recomendaciones..."):
+            self.recommender = self._initialize_recommender()
+    
     def render_poster(self, movie_id, movie_data, width=None, use_container=False):
         """Renderizar poster de forma centralizada y consistente.
         Args:
@@ -298,6 +311,8 @@ class DataManager:
         Returns:
             DataFrame con recomendaciones o None si hay error
         """
+        # inicializar el recomendador si aún no se ha creado
+        self.ensure_recommender_initialized()
         if self.recommender is None:
             return None
         

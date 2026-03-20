@@ -69,6 +69,19 @@ class AppManager:
         """Mostrar recomendaciones personalizadas"""
         st.subheader("🎯 Películas Recomendadas para Ti")
         
+        # casilla que decide si se usan las recomendaciones
+        use_recommender = st.checkbox(
+            "SR Basado en Contenido",
+            value=False,
+            key="use_content_recommender",
+        )
+        if not use_recommender:
+            st.info("Activa la casilla 'SR Basado en Contenido' para generar recomendaciones.")
+            return
+        
+        # inicializar motor bajo demanda
+        self.data_manager.ensure_recommender_initialized()
+        
         # Verificar si el recomendador está disponible
         if self.data_manager.recommender is None:
             st.warning(
