@@ -18,10 +18,10 @@ def main():
     test_user = "1"
     print(f"=== Vecinos del usuario {test_user} ===")
     t0 = time.time()
-    neighbors, user_vec = rec._find_neighbors(test_user, top_n=40)
+    neighbors = rec._find_neighbors(test_user, top_n=40)
     print(f"Calculado en {time.time() - t0:.2f}s")
-    for nid, sim in neighbors:
-        print(f"  Vecino {nid}:     Pearson = {sim:.4f} Vector = {user_vec}")
+    for nid, sim, user_vec in neighbors:
+        print(f"  Vecino {nid}:     Pearson = {sim:.4f}: user_vec={user_vec}")
     print()
 
     # 3. Recomendaciones para el usuario

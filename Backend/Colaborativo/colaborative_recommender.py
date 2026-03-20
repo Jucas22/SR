@@ -17,7 +17,7 @@ from sklearn.preprocessing import MultiLabelBinarizer, MinMaxScaler
 
 class ColaborativeRecommender:
 
-    FILE_PATH_PREFERENCE_MATRIX = "preference_matrix.npz"
+    FILE_PATH_PREFERENCE_MATRIX = "Backend/Colaborativo/preference_matrix.npz"
 
     FILE_PATH_RATINGS = "Data/Clean_data/train_ratings.json"
     MIN_COMMON_PREFS = 10  # umbral para decidir intersección vs unión
@@ -113,7 +113,8 @@ class ColaborativeRecommender:
             all_neighbors[uid] = neighbors
             # Guardar en el registro del usuario
             self.user_registry["users"][uid]["neighbors"] = [
-                {"user_id": nid, "similarity": round(sim, 6)} for nid, sim in neighbors
+                {"user_id": nid, "similarity": round(sim, 6)}
+                for nid, sim, _ in neighbors
             ]
             if (i + 1) % 100 == 0:
                 print(f"Vecinos calculados: {i + 1}/{total}")
@@ -140,7 +141,7 @@ class ColaborativeRecommender:
             ]
         else:
             self.get_preference_matrix()
-            neighbors, _ = self._find_neighbors(user_id)
+            neighbors = self._find_neighbors(user_id)
 
         if not neighbors:
             return []
@@ -172,10 +173,10 @@ class ColaborativeRecommender:
             ]
         else:
             self.get_preference_matrix()
-            neighbors, _ = self._find_neighbors(user_id)
+            neighbors = self._find_neighbors(user_id)
 
         contributors = []
-        for neighbor_id, sim in neighbors:
+        for neighbor_id, sim, _ in neighbors:
             nid_int = int(neighbor_id)
             neighbor_ratings = self.ratings_by_user.get(nid_int, {})
             if movie_id in neighbor_ratings:
@@ -269,10 +270,10 @@ class ColaborativeRecommender:
             other_vec = self.preference_matrix[other_idx].toarray().flatten()
             sim = self._pearson_similarity(user_vec, other_vec)
             if sim > 0:  # Solo vecinos con correlación positiva
-                similarities.append((other_uid, sim))
+                similarities.append((other_uid, sim, other_vec))
 
         similarities.sort(key=lambda x: x[1], reverse=True)
-        return similarities[:top_n], user_vec
+        return similarities[:top_n]
 
     def _build_genre_map(self) -> Dict[str, int]:
         """
@@ -326,7 +327,7 @@ class ColaborativeRecommender:
         seen = set(user_data["preferences"].get("watched_movies", []))
 
         candidates = set()
-        for neighbor_id, _sim in neighbors:
+        for neighbor_id, _sim, _ in neighbors:
             nid_int = int(neighbor_id)
             neighbor_ratings = self.ratings_by_user.get(nid_int, {})
             for movie_id, rating in neighbor_ratings.items():
@@ -350,7 +351,7 @@ class ColaborativeRecommender:
         for movie_id in candidate_items:
             numerator = 0.0
             denominator = 0.0
-            for neighbor_id, sim in neighbors:
+            for neighbor_id, sim, _ in neighbors:
                 nid_int = int(neighbor_id)
                 neighbor_ratings = self.ratings_by_user.get(nid_int, {})
                 if movie_id in neighbor_ratings:

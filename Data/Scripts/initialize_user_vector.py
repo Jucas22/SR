@@ -1,21 +1,24 @@
 """
 Inicializa el vector de preferencias de género para cada usuario del sistema.
 
-Método: Acumulación ponderada positiva normalizada a [0, 100].
-  1. Para cada usuario, solo se consideran ratings por encima de un umbral
-     (media del usuario), que representan películas que le gustaron.
-  2. El peso de cada rating es (rating - umbral), siempre positivo.
-  3. Se acumula y promedia por género.
-  4. Se normaliza a [0, 100] donde 100 = género de máxima afinidad.
+Método: Acumulación ponderada centrada, normalizada a [0, 100] por usuario.
+  1. Se usan TODOS los ratings del usuario (no solo los que superan la media).
+  2. El peso de cada rating es (rating - media_usuario), que puede ser negativo.
+  3. Se acumula y promedia por género → refleja afinidad relativa real.
+  4. Los géneros vistos se normalizan a [0, 100] con min-max por usuario:
+       - 100 = género de máxima afinidad relativa
+       -   0 = género de mínima afinidad relativa (o nunca visto)
+  5. Géneros que el usuario nunca ha visto quedan en 0.
 
-¿Por qué solo valores positivos en [0, 100]?
-  - Al usar solo valores ≥ 0, la similitud coseno queda acotada a [0, 1],
-    lo que la hace directamente interpretable como porcentaje de afinidad.
-  - Vectores no-negativos evitan que géneros se "cancelen" entre sí durante
-    el cálculo de similitud, lo que podría producir recomendaciones erráticas.
-  - El rango 0-100 es intuitivo: 0 = sin interés, 100 = máxima afinidad.
-  - Es consistente con enfoques estándar de perfiles TF-IDF en sistemas
-    basados en contenido, donde los pesos son siempre no-negativos.
+¿Por qué incluir todos los ratings (no solo los positivos)?
+  - Evita esparsidad artificial: géneros vistos en películas mal puntuadas
+    también aportan información valiosa (rechazo relativo).
+  - Para el SR colaborativo (Pearson), los valores bajos de un género son tan
+    informativos como los altos: ayudan a separar usuarios con gustos distintos.
+  - El SR basado en contenido puede usar este mismo vector filtrando solo los
+    x géneros con mayor puntuación (top-k) sin necesidad de un vector aparte.
+  - El rango [0, 100] mantiene la interpretabilidad y la compatibilidad con
+    similitud coseno (valores no negativos, resultado acotado a [0, 1]).
 
 Solo usa datos de TRAIN para evitar fuga de información.
 """
@@ -73,13 +76,12 @@ def build_user_vectors(train_ratings, movie_genres, genre_map):
     """
     Construye vector de preferencias por género para cada usuario.
 
-    Método: acumulación ponderada positiva.
-    - Solo se usan ratings por encima de la media del usuario (películas que
-      le gustaron más de lo habitual).
-    - El peso es (rating - media), siempre > 0.
-    - Se promedia por género y se normaliza a [0, 100].
+    Método: acumulación ponderada centrada.
+    - Se usan TODOS los ratings (incluyendo los por debajo de la media).
+    - El peso es (rating - media_usuario), puede ser negativo.
+    - Los géneros vistos se normalizan a [0, 100] con min-max por usuario.
+    - Los géneros nunca vistos quedan en 0.
     """
-    # Agrupar ratings por usuario
     ratings_by_user = defaultdict(list)
     for r in train_ratings:
         ratings_by_user[int(r["userId"])].append(r)
@@ -88,51 +90,55 @@ def build_user_vectors(train_ratings, movie_genres, genre_map):
     user_vectors = {}
 
     for user_id, ratings in ratings_by_user.items():
-        # Media del usuario (umbral de "le gustó")
         mean_rating = sum(r["rating"] for r in ratings) / len(ratings)
 
-        # Acumuladores por género (solo ratings positivos)
         genre_score_sum = defaultdict(float)
         genre_count = defaultdict(int)
 
         for r in ratings:
             movie_id = int(r["movieId"])
-            weight = r["rating"] - mean_rating
-            if weight <= 0:
-                continue  # Ignorar películas que no le gustaron
+            weight = r["rating"] - mean_rating  # positivo si gustó, negativo si no
             genres = movie_genres.get(movie_id, [])
             if not genres:
                 continue
-            # Distribuir el peso positivo entre los géneros de la película
             weight_per_genre = weight / len(genres)
             for g in genres:
                 genre_score_sum[g] += weight_per_genre
                 genre_count[g] += 1
 
-        # Construir vector: media de los pesos positivos por género
+        # Vector con la afinidad centrada media por género
         raw_vector = {}
         for g in all_genre_ids:
             if genre_count[g] > 0:
                 raw_vector[g] = genre_score_sum[g] / genre_count[g]
             else:
-                raw_vector[g] = 0.0
+                raw_vector[g] = None  # nunca visto
 
-        # Normalizar a [0, 100]
-        max_val = max(raw_vector.values(), default=1.0)
-        if max_val > 0:
-            normalized = {
-                g: round((v / max_val) * 100, 2) for g, v in raw_vector.items()
-            }
+        # Normalizar solo géneros vistos a [0, 100] con min-max
+        seen_scores = [v for v in raw_vector.values() if v is not None]
+        if seen_scores:
+            min_val = min(seen_scores)
+            max_val = max(seen_scores)
+            range_val = max_val - min_val
         else:
-            normalized = {g: 0.0 for g in raw_vector}
+            min_val = max_val = range_val = 0.0
 
-        # Guardar con nombres legibles
+        normalized = {}
+        for g in all_genre_ids:
+            if raw_vector[g] is None:
+                normalized[g] = 0.0  # género no visto
+            elif range_val > 0:
+                normalized[g] = round(((raw_vector[g] - min_val) / range_val) * 100, 2)
+            else:
+                normalized[g] = 50.0  # todos los géneros vistos igual de valorados
+
+        # Convertir a nombres legibles
         vector_named = {}
         for genre_id in all_genre_ids:
             name = genre_map.get(genre_id, f"genre_{genre_id}")
             vector_named[name] = normalized.get(genre_id, 0.0)
 
-        # Top géneros favoritos (positivos, ordenados)
+        # Top géneros: los de mayor puntuación normalizada
         top_genres = sorted(
             [(name, score) for name, score in vector_named.items() if score > 0],
             key=lambda x: x[1],
