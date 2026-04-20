@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import json
 import math
@@ -17,9 +18,9 @@ from sklearn.preprocessing import MultiLabelBinarizer, MinMaxScaler
 
 class ColaborativeRecommender:
 
-    FILE_PATH_PREFERENCE_MATRIX = "Backend/Colaborativo/preference_matrix.npz"
+    FILE_PATH_PREFERENCE_MATRIX = Path(__file__).parent / "preference_matrix.npz"
 
-    FILE_PATH_RATINGS = "Data/Clean_data/train_ratings.json"
+    FILE_PATH_RATINGS = Path(__file__).parent.parent.parent / "Data" / "Clean_data" / "train_ratings.json"
     MIN_COMMON_PREFS = 10  # umbral para decidir intersección vs unión
     FAVORABLE_RATING_THRESHOLD = 3.5  # rating mínimo para considerar "favorable"
 
@@ -40,9 +41,9 @@ class ColaborativeRecommender:
         Si no, la construye a partir de los datos de entrenamiento y la guarda para uso futuro.
         """
         if self.preference_matrix is None:
-            if os.path.exists(self.FILE_PATH_PREFERENCE_MATRIX):
+            if os.path.exists(str(self.FILE_PATH_PREFERENCE_MATRIX)):
                 self.preference_matrix = sparse.load_npz(
-                    self.FILE_PATH_PREFERENCE_MATRIX
+                    str(self.FILE_PATH_PREFERENCE_MATRIX)
                 )
                 self._rebuild_user_mappings()
             else:
@@ -89,7 +90,7 @@ class ColaborativeRecommender:
 
         matrix = np.vstack(rows)  # shape: (n_users, n_genres)
         self.preference_matrix = sparse.csr_matrix(matrix)
-        sparse.save_npz(self.FILE_PATH_PREFERENCE_MATRIX, self.preference_matrix)
+        sparse.save_npz(str(self.FILE_PATH_PREFERENCE_MATRIX), self.preference_matrix)
         print(
             f"Matriz de preferencias construida: {self.preference_matrix.shape} "
             f"({idx} usuarios × {n_genres} géneros)"
@@ -296,7 +297,7 @@ class ColaborativeRecommender:
         """
         Carga train_ratings.json y organiza como {userId: {movieId: rating}}.
         """
-        path = self.FILE_PATH_RATINGS
+        path = str(self.FILE_PATH_RATINGS)
         if not os.path.exists(path):
             return {}
         with open(path, "r", encoding="utf-8") as f:

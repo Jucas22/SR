@@ -69,18 +69,40 @@ class AppManager:
         """Mostrar recomendaciones personalizadas"""
         st.subheader("🎯 Películas Recomendadas para Ti")
         
-        # casilla que decide si se usan las recomendaciones
-        use_recommender = st.checkbox(
-            "SR Basado en Contenido",
-            value=False,
-            key="use_content_recommender",
-        )
-        if not use_recommender:
-            st.info("Activa la casilla 'SR Basado en Contenido' para generar recomendaciones.")
+        # Selector de tipo de recomendador
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            recommender_type = st.selectbox(
+                "Selecciona un sistema recomendador:",
+                options=["content", "collaborative", "hybrid"],
+                format_func=lambda x: {
+                    "content": "📚 Basado en Contenido",
+                    "collaborative": "👥 Colaborativo",
+                    "hybrid": "🔄 Híbrido"
+                }.get(x, x),
+                key="recommender_type_selector"
+            )
+        
+        with col2:
+            st.write("")  # Espaciador para alineación
+            enable_recommender = st.checkbox("Activar", value=True, key="enable_recommender")
+        
+        if not enable_recommender:
+            st.info("✓ Selecciona 'Activar' para generar recomendaciones con el sistema elegido.")
             return
         
-        # inicializar motor bajo demanda
-        self.data_manager.ensure_recommender_initialized()
+        user_id = self.auth_manager.get_current_user_id()
+        
+        # Mostrar información del sistema seleccionado
+        if recommender_type == "content":
+            st.info("📚 **Basado en Contenido**: Recomendaciones según géneros, palabras clave y características de películas que te gustaron.")
+        elif recommender_type == "collaborative":
+            st.info("👥 **Colaborativo**: Recomendaciones basadas en usuarios similares a ti y sus preferencias.")
+        else:  # hybrid
+            st.info("🔄 **Híbrido**: Combinación de recomendaciones basadas en contenido y colaborativas para mayor precisión.")
+        
+        # Inicializar recomendador
+        self.data_manager.ensure_recommender_initialized(recommender_type)
         
         # Verificar si el recomendador está disponible
         if self.data_manager.recommender is None:
@@ -91,10 +113,8 @@ class AppManager:
             st.info("💡 Puedes explorar manualmente en la sección 'Explorar' y aún así guardar tus ratings.")
             return
         
-        user_id = self.auth_manager.get_current_user_id()
-        
         # Controles
-        col1, col2 = st.columns([2, 1])
+        col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
             num_recommendations = st.slider(
                 "¿Cuántas recomendaciones quieres?",
@@ -105,13 +125,22 @@ class AppManager:
             )
         
         with col2:
-            exclude_seen = st.checkbox("Excluir vistas", value=True)
+            # Solo mostrar "Excluir vistas" para basado en contenido
+            if recommender_type == "content":
+                exclude_seen = st.checkbox("Excluir vistas", value=True)
+            else:
+                exclude_seen = False
+                st.write("")  # Espaciador
+        
+        with col3:
+            st.write("")  # Espaciador para alineación
         
         # Obtener recomendaciones
         recommendations_df = self.data_manager.get_recommendations(
             user_id,
             top_k=num_recommendations,
-            exclude_seen=exclude_seen
+            exclude_seen=exclude_seen,
+            recommender_type=recommender_type
         )
         
         if recommendations_df is not None and not recommendations_df.empty:

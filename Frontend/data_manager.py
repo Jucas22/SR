@@ -11,6 +11,8 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from Backend.content_recommender import ContentBasedRecommender
+from Backend.Colaborativo.colaborative_recommender import ColaborativeRecommender
+from Backend.hybrid_recommender import HybridRecommender
 from Backend.user_registry_manager import UserRegistryManager
 
 
@@ -30,8 +32,12 @@ class DataManager:
         self.movies = self._load_movies()
         self.genre_mapping = self._load_genre_mapping()
         
-        # Inicializar campos; el recomendador se crea más tarde bajo demanda
-        self.recommender = None
+        # Inicializar campos; los recomendadores se crean bajo demanda
+        self.content_recommender = None
+        self.collaborative_recommender = None
+        self.hybrid_recommender = None
+        self.recommender = None  # Para compatibilidad hacia atrás
+        self.current_recommender_type = "content"  # Por defecto
         self.user_registry_manager = UserRegistryManager()
 
     def _load_movies(self):
@@ -163,6 +169,57 @@ class DataManager:
             traceback.print_exc()
             return None
 
+    def _initialize_collaborative_recommender(self):
+        """Inicializar y entrenar el recomendador colaborativo"""
+        try:
+            user_registry_path = Path(__file__).parent.parent / "Data" / "user_registry.json"
+            movie_data_path = Path(__file__).parent.parent / "Data" / "Clean_data" / "enhanced_movies.json"
+            
+            if not user_registry_path.exists() or not movie_data_path.exists():
+                st.warning("⚠️ Archivos necesarios no encontrados para recomendador colaborativo")
+                return None
+            
+            recommender = ColaborativeRecommender(
+                user_registry_path=str(user_registry_path),
+                movie_data_path=str(movie_data_path)
+            )
+            st.success("✅ Recomendador colaborativo inicializado correctamente")
+            return recommender
+        except Exception as e:
+            error_msg = str(e)
+            st.error(f"❌ Error: {error_msg[:100]}")
+            print(f"❌ Error completo: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _initialize_hybrid_recommender(self):
+        """Inicializar el recomendador híbrido"""
+        try:
+            # Asegurar que ambos recomendadores estén inicializados
+            if self.content_recommender is None:
+                self.content_recommender = self._initialize_recommender()
+            if self.collaborative_recommender is None:
+                self.collaborative_recommender = self._initialize_collaborative_recommender()
+            
+            if self.content_recommender is None or self.collaborative_recommender is None:
+                st.warning("⚠️ No se pudieron inicializar los recomendadores base para el modo híbrido")
+                return None
+            
+            recommender = HybridRecommender(
+                content_model=self.content_recommender,
+                collaborative_model=self.collaborative_recommender
+            )
+            st.success("✅ Recomendador híbrido inicializado correctamente")
+            return recommender
+        except Exception as e:
+            error_msg = str(e)
+            st.error(f"❌ Error: {error_msg[:100]}")
+            print(f"❌ Error completo: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     def get_genre_names(self, genre_ids):
         """Convertir IDs de géneros a nombres"""
         if isinstance(genre_ids, list):
@@ -213,18 +270,41 @@ class DataManager:
         except Exception:
             return "https://via.placeholder.com/300x450/1a1a2e/e0e0e0?text=Error", True
 
-    def ensure_recommender_initialized(self):
+    def ensure_recommender_initialized(self, recommender_type="content"):
         """Crea y entrena el recomendador si aún no existe.
 
         Este método puede ser llamado varias veces de forma segura: si el
         recomendador ya está preparado no hace nada. Está pensado para ser
         invocado desde la interfaz cuando el usuario solicita recomendaciones.
+        
+        Args:
+            recommender_type: Tipo de recomendador ("content", "collaborative" o "hybrid")
         """
-        if self.recommender is not None:
-            return
-        # utilizar spinner para feedback visual
-        with st.spinner("🔧 Inicializando motor de recomendaciones..."):
-            self.recommender = self._initialize_recommender()
+        self.current_recommender_type = recommender_type
+        
+        if recommender_type == "content":
+            if self.content_recommender is not None:
+                self.recommender = self.content_recommender
+                return
+            with st.spinner("🔧 Inicializando recomendador basado en contenido..."):
+                self.content_recommender = self._initialize_recommender()
+                self.recommender = self.content_recommender
+                
+        elif recommender_type == "collaborative":
+            if self.collaborative_recommender is not None:
+                self.recommender = self.collaborative_recommender
+                return
+            with st.spinner("🔧 Inicializando recomendador colaborativo..."):
+                self.collaborative_recommender = self._initialize_collaborative_recommender()
+                self.recommender = self.collaborative_recommender
+                
+        elif recommender_type == "hybrid":
+            if self.hybrid_recommender is not None:
+                self.recommender = self.hybrid_recommender
+                return
+            with st.spinner("🔧 Inicializando recomendador híbrido..."):
+                self.hybrid_recommender = self._initialize_hybrid_recommender()
+                self.recommender = self.hybrid_recommender
     
     def render_poster(self, movie_id, movie_data, width=None, use_container=False):
         """Renderizar poster de forma centralizada y consistente.
@@ -299,31 +379,73 @@ class DataManager:
         """Obtener el número total de películas"""
         return len(self.movies)
 
-    def get_recommendations(self, user_id, top_k=10, exclude_seen=True):
+    def get_recommendations(self, user_id, top_k=10, exclude_seen=True, recommender_type="content"):
         """
         Obtener recomendaciones personalizadas para un usuario
         
         Args:
             user_id: ID del usuario
             top_k: Número de recomendaciones a devolver
-            exclude_seen: Si True, excluye películas ya vistas
+            exclude_seen: Si True, excluye películas ya vistas (solo para basado en contenido)
+            recommender_type: Tipo de recomendador ("content", "collaborative" o "hybrid")
             
         Returns:
             DataFrame con recomendaciones o None si hay error
         """
-        # inicializar el recomendador si aún no se ha creado
-        self.ensure_recommender_initialized()
+        # Inicializar el recomendador apropiado
+        self.ensure_recommender_initialized(recommender_type)
         if self.recommender is None:
             return None
         
         try:
-            recommendations_df = self.recommender.recommend(
-                user_id=user_id,
-                top_k=top_k,
-                exclude_seen=exclude_seen,
-                return_df=True
-            )
-            return recommendations_df
+            # Diferentes métodos según el tipo
+            if recommender_type == "content":
+                # El recomendador basado en contenido devuelve DataFrame
+                recommendations_df = self.recommender.recommend(
+                    user_id=user_id,
+                    top_k=top_k,
+                    exclude_seen=exclude_seen,
+                    return_df=True
+                )
+                return recommendations_df
+                
+            elif recommender_type == "collaborative":
+                # El recomendador colaborativo devuelve lista de tuplas
+                recommendations = self.recommender.recommend(user_id=str(user_id), top_n=top_k)
+                if recommendations:
+                    # Convertir a formato DataFrame para compatibilidad
+                    df_data = []
+                    for movie_id, score in recommendations:
+                        # Normalizar score de rating (0-5) a porcentaje (0-1)
+                        normalized_score = min(score / 5.0, 1.0) if score > 0 else 0.0
+                        df_data.append({
+                            "movie_id": movie_id,
+                            "score": normalized_score,
+                            "reasons": []
+                        })
+                    return pd.DataFrame(df_data)
+                return None
+                
+            elif recommender_type == "hybrid":
+                # El recomendador híbrido devuelve lista de tuplas
+                recommendations = self.recommender.recommend(user_id=user_id, top_k=top_k)
+                if recommendations:
+                    # Convertir a formato DataFrame para compatibilidad
+                    df_data = []
+                    for movie_id, score in recommendations:
+                        # Normalizar score de rating (0-5) a porcentaje (0-1)
+                        normalized_score = min(score / 5.0, 1.0) if score > 0 else 0.0
+                        df_data.append({
+                            "movie_id": movie_id,
+                            "score": normalized_score,
+                            "reasons": []
+                        })
+                    return pd.DataFrame(df_data)
+                return None
+            else:
+                st.error(f"Tipo de recomendador no válido: {recommender_type}")
+                return None
+                
         except Exception as e:
             st.warning(f"No se pudieron generar recomendaciones para este usuario: {e}")
             return None
@@ -356,20 +478,22 @@ class DataManager:
             movie_id: ID de la película
             rating: Calificación (0-5 típicamente)
         """
-        if self.recommender is None:
-            st.error("❌ El recomendador no está inicializado")
-            return False
-        
         try:
             # Convertir a tipos correctos
             user_id = int(user_id)
             movie_id = int(movie_id)
             rating = float(rating)
             
-            # Actualizar en el recomendador
-            self.recommender.update_user_profile(user_id, movie_id, rating)
+            # Actualizar en el recomendador actual si es compatible
+            if self.recommender is not None:
+                if self.current_recommender_type == "content":
+                    # El recomendador basado en contenido sí tiene update_user_profile
+                    try:
+                        self.recommender.update_user_profile(user_id, movie_id, rating)
+                    except Exception as update_err:
+                        st.warning(f"⚠️ El recomendador colaborativo/híbrido no actualiza perfiles en tiempo real")
             
-            # Obtener películas vistas actuales
+            # Actualizar en el registry del usuario (válido para todos)
             user_data = self.user_registry_manager.get_user(user_id)
             watched_movies = user_data.get("preferences", {}).get("watched_movies", []) if user_data else []
             
