@@ -1,10 +1,10 @@
 {
   "metadata": {
-    "last_user_id": 672,
-    "total_users": 671,
-    "active_users": 671,
+    "last_user_id": 673,
+    "total_users": 672,
+    "active_users": 672,
     "created_date": "2026-03-11",
-    "last_updated": "2026-03-11"
+    "last_updated": "2026-03-20"
   },
   "users": {
     "1": {
@@ -54248,6 +54248,30 @@
         "avg_rating": 0.0,
         "rating_count": 0,
         "active_since": "2026-03-08"
+      }
+    },
+    "673": {
+      "user_id": 673,
+      "name": "Juan Castelló",
+      "status": "active",
+      "created_date": "2026-03-20",
+      "last_activity": "2026-03-20",
+      "total_ratings": 1,
+      "user_type": "new",
+      "preferences": {
+        "favorite_genres": [
+          "Animaci¢n",
+          "Drama",
+          "Romance"
+        ],
+        "watched_movies": [
+          120
+        ]
+      },
+      "statistics": {
+        "avg_rating": 0.0,
+        "rating_count": 1,
+        "active_since": "2026-03-20"
       }
     }
   }

@@ -64,7 +64,7 @@ class AuthManager:
             "Selecciona tu usuario:", options=list(user_options.keys())
         )
 
-        if st.button("🚀 Iniciar Sesión", type="primary", use_container_width=True):
+        if st.button("🚀 Iniciar Sesión", type="primary", width="stretch"):
             selected_user_id = user_options[selected_user_display]
             st.session_state.logged_in = True
             st.session_state.user_id = selected_user_id
@@ -92,7 +92,7 @@ class AuthManager:
         else:
             favorite_genres = []
 
-        if st.button("✨ Crear Usuario", type="primary", use_container_width=True):
+        if st.button("✨ Crear Usuario", type="primary", width="stretch"):
             try:
                 # Crear preferencias del usuario
                 user_preferences = {

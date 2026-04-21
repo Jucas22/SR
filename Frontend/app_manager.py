@@ -29,7 +29,9 @@ class AppManager:
         st.title("🎬 Recomendador de Películas")
 
         # Pestañas principales
-        tab1, tab2, tab3, tab4 = st.tabs(["🎯 Recomendadas", "🔍 Explorar", "⭐ Mis Ratings", "📊 Estadísticas"])
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["🎯 Recomendadas", "🔍 Explorar", "⭐ Mis Ratings", "📊 Estadísticas"]
+        )
 
         with tab1:
             self._render_recommendations()
@@ -68,31 +70,25 @@ class AppManager:
     def _render_recommendations(self):
         """Mostrar recomendaciones personalizadas"""
         st.subheader("🎯 Películas Recomendadas para Ti")
-        
-        # casilla que decide si se usan las recomendaciones
-        use_recommender = st.checkbox(
+
+        # Casillas para activar cada motor de recomendación de forma independiente.
+        use_content_recommender = st.checkbox(
             "SR Basado en Contenido",
             value=False,
             key="use_content_recommender",
         )
-        if not use_recommender:
-            st.info("Activa la casilla 'SR Basado en Contenido' para generar recomendaciones.")
+        use_colaborative_recommender = st.checkbox(
+            "SR Colaborativo",
+            value=False,
+            key="use_colaborative_recommender",
+        )
+
+        if not use_content_recommender and not use_colaborative_recommender:
+            st.info("Activa alguna casilla para generar recomendaciones.")
             return
-        
-        # inicializar motor bajo demanda
-        self.data_manager.ensure_recommender_initialized()
-        
-        # Verificar si el recomendador está disponible
-        if self.data_manager.recommender is None:
-            st.warning(
-                "⚠️ El recomendador no está disponible en este momento. "
-                "La app seguirá funcionando, pero sin recomendaciones personalizadas."
-            )
-            st.info("💡 Puedes explorar manualmente en la sección 'Explorar' y aún así guardar tus ratings.")
-            return
-        
+
         user_id = self.auth_manager.get_current_user_id()
-        
+
         # Controles
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -101,53 +97,85 @@ class AppManager:
                 min_value=5,
                 max_value=20,
                 value=10,
-                step=5
+                step=5,
             )
-        
+
         with col2:
             exclude_seen = st.checkbox("Excluir vistas", value=True)
-        
-        # Obtener recomendaciones
-        recommendations_df = self.data_manager.get_recommendations(
-            user_id,
-            top_k=num_recommendations,
-            exclude_seen=exclude_seen
+
+        # Mostrar recomendaciones en grid
+        cols_per_row = st.selectbox(
+            "Columnas:",
+            options=[2, 3, 4, 5],
+            index=2,
+            key="rec_cols",
         )
-        
-        if recommendations_df is not None and not recommendations_df.empty:
-            st.info(f"✨ {len(recommendations_df)} películas recomendadas especialmente para ti")
-            
-            # Mostrar recomendaciones en grid
-            cols_per_row = st.selectbox(
-                "Columnas:",
-                options=[2, 3, 4, 5],
-                index=2,
-                key="rec_cols"
+
+        if use_content_recommender:
+            self.data_manager.ensure_recommender_initialized()
+            if self.data_manager.recommender is None:
+                st.warning(
+                    "⚠️ El recomendador basado en contenido no está disponible en este momento."
+                )
+            else:
+                recommendations_df = self.data_manager.get_recommendations(
+                    user_id,
+                    top_k=num_recommendations,
+                    exclude_seen=exclude_seen,
+                )
+
+                st.markdown("### 🧠 Recomendaciones Basadas en Contenido")
+                if recommendations_df is not None and not recommendations_df.empty:
+                    st.info(
+                        f"✨ {len(recommendations_df)} recomendaciones basadas en tu perfil de contenido"
+                    )
+
+                    movies_to_show = []
+                    for _, rec in recommendations_df.iterrows():
+                        movie_id = int(rec["movie_id"])
+                        if str(movie_id) in self.data_manager.movies:
+                            movie_data = self.data_manager.movies[str(movie_id)]
+                            movie_data["_score"] = rec["score"]
+                            movie_data["_reasons"] = rec["reasons"]
+                            movies_to_show.append((movie_id, movie_data))
+
+                    if movies_to_show:
+                        self._render_recommendations_grid(movies_to_show, cols_per_row)
+                    else:
+                        st.info(
+                            "No se encontraron películas disponibles para estas recomendaciones."
+                        )
+                else:
+                    st.info(
+                        "📌 No hay suficientes datos para generar recomendaciones basadas en contenido."
+                    )
+
+        if use_colaborative_recommender:
+            st.markdown("### 🤝 Recomendaciones del SR Colaborativo")
+            colaborative_recs = self.data_manager.get_colaborative_recommendations(
+                user_id=user_id,
+                top_k=num_recommendations,
             )
-            
-            movies_to_show = []
-            for _, rec in recommendations_df.iterrows():
-                movie_id = int(rec["movie_id"])
-                if str(movie_id) in self.data_manager.movies:
-                    movie_data = self.data_manager.movies[str(movie_id)]
-                    movie_data["_score"] = rec["score"]
-                    movie_data["_reasons"] = rec["reasons"]
-                    movies_to_show.append((movie_id, movie_data))
-            
-            if movies_to_show:
-                self._render_recommendations_grid(movies_to_show, cols_per_row)
-        else:
-            st.info(
-                "📌 No hay suficientes datos para generar recomendaciones personalizadas. "
-                "¡Comienza a calificar películas para obtener mejores recomendaciones!"
-            )
-            st.info("💡 Ve a la sección 'Explorar' y califica algunas películas que hayas visto.")
+
+            if colaborative_recs:
+                st.info(
+                    f"👥 {len(colaborative_recs)} recomendaciones basadas en usuarios similares"
+                )
+                self._render_colaborative_recommendations_grid(
+                    user_id=user_id,
+                    recommendations=colaborative_recs,
+                    cols_per_row=cols_per_row,
+                )
+            else:
+                st.info(
+                    "📌 No hay suficientes vecinos para generar recomendaciones colaborativas todavía."
+                )
 
     def _render_recommendations_grid(self, movies_list, cols_per_row=4):
         """Renderizar grid de recomendaciones"""
         for i in range(0, len(movies_list), cols_per_row):
             cols = st.columns(cols_per_row, gap="medium")
-            
+
             for j, col in enumerate(cols):
                 if i + j < len(movies_list):
                     movie_id, movie_data = movies_list[i + j]
@@ -158,8 +186,10 @@ class AppManager:
         """Renderizar tarjeta de recomendación individual"""
         with st.container(border=True):
             # Poster
-            self.data_manager.render_poster(str(movie_id), movie_data, use_container=True)
-            
+            self.data_manager.render_poster(
+                str(movie_id), movie_data, use_container=True
+            )
+
             # Título
             title = movie_data.get("titulo", "Sin título")
             display_title = title[:35] + "..." if len(title) > 38 else title
@@ -167,20 +197,89 @@ class AppManager:
                 f"<p class='movie-card-title'>{display_title}</p>",
                 unsafe_allow_html=True,
             )
-            
+
             # Score
             if "_score" in movie_data:
                 score = movie_data["_score"]
                 st.metric("Compatibilidad", f"{score:.1%}")
-            
+
             # Razones
             if "_reasons" in movie_data and movie_data["_reasons"]:
                 with st.expander("Por qué se recomienda"):
                     for reason in movie_data["_reasons"][:2]:
                         st.write(f"• {reason}")
-            
+
             # Botón para ver detalles
-            if st.button("👁️ Ver Detalles", key=f"rec_{movie_id}", use_container_width=True):
+            if st.button("👁️ Ver Detalles", key=f"rec_{movie_id}", width="stretch"):
+                st.session_state.selected_movie_id = movie_id
+                st.rerun()
+
+    def _render_colaborative_recommendations_grid(
+        self, user_id, recommendations, cols_per_row=4
+    ):
+        """Renderizar grid de recomendaciones colaborativas."""
+        movies_to_show = []
+        for movie_id, predicted_rating in recommendations:
+            if str(movie_id) in self.data_manager.movies:
+                movie_data = self.data_manager.movies[str(movie_id)]
+                movie_data["_predicted_rating"] = predicted_rating
+                movies_to_show.append((movie_id, movie_data))
+
+        for i in range(0, len(movies_to_show), cols_per_row):
+            cols = st.columns(cols_per_row, gap="medium")
+
+            for j, col in enumerate(cols):
+                if i + j < len(movies_to_show):
+                    movie_id, movie_data = movies_to_show[i + j]
+                    with col:
+                        self._render_colaborative_recommendation_card(
+                            user_id=user_id,
+                            movie_id=movie_id,
+                            movie_data=movie_data,
+                        )
+
+    def _render_colaborative_recommendation_card(self, user_id, movie_id, movie_data):
+        """Renderizar tarjeta de recomendación colaborativa con explicación por vecinos."""
+        with st.container(border=True):
+            self.data_manager.render_poster(
+                str(movie_id), movie_data, use_container=True
+            )
+
+            title = movie_data.get("titulo", "Sin título")
+            display_title = title[:35] + "..." if len(title) > 38 else title
+            st.markdown(
+                f"<p class='movie-card-title'>{display_title}</p>",
+                unsafe_allow_html=True,
+            )
+
+            predicted_rating = movie_data.get("_predicted_rating")
+            if predicted_rating is not None:
+                st.metric("Rating Predicho", f"{predicted_rating:.2f}⭐")
+
+            explanation = self.data_manager.get_colaborative_recommendation_explanation(
+                user_id=user_id,
+                movie_id=movie_id,
+            )
+            contributors = explanation.get("contributors", []) if explanation else []
+            with st.expander("Por qué se recomienda"):
+                if contributors:
+                    st.write("Vecinos que también han valorado esta película:")
+                    for contributor in contributors[:5]:
+                        st.write(
+                            f"• Usuario {contributor['neighbor_id']} | "
+                            f"Similitud: {contributor['similarity']:.3f} | "
+                            f"Rating: {contributor['rating']:.1f}"
+                        )
+                else:
+                    st.write(
+                        "No hay vecinos contribuyentes disponibles para esta película."
+                    )
+
+            if st.button(
+                "👁️ Ver Detalles",
+                key=f"colab_rec_{movie_id}",
+                width="stretch",
+            ):
                 st.session_state.selected_movie_id = movie_id
                 st.rerun()
 
@@ -394,15 +493,15 @@ class AppManager:
                 try:
                     # Asegurar que movie_id es un integer válido
                     clean_movie_id = int(movie_id)
-                    
+
                     result = self.data_manager.update_user_rating(
-                        user_id, 
-                        clean_movie_id, 
-                        user_rating
+                        user_id, clean_movie_id, user_rating
                     )
                     if result:
                         st.success(f"✅ ¡Rating guardado: {user_rating} ⭐!")
-                        st.info("🎯 Tu perfil ha sido actualizado. Las recomendaciones mejorarán con más ratings.")
+                        st.info(
+                            "🎯 Tu perfil ha sido actualizado. Las recomendaciones mejorarán con más ratings."
+                        )
                         st.balloons()
                         # Actualizar los datos de sesión del usuario
                         updated_user = self.auth_manager.user_manager.get_user(user_id)

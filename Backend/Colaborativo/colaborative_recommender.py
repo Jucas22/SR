@@ -45,12 +45,38 @@ class ColaborativeRecommender:
                     self.FILE_PATH_PREFERENCE_MATRIX
                 )
                 self._rebuild_user_mappings()
+                if not self._is_cached_matrix_compatible():
+                    print(
+                        "Matriz de preferencias desactualizada detectada. "
+                        "Reconstruyendo desde user_registry..."
+                    )
+                    self._build_preference_matrix()
             else:
                 self._build_preference_matrix()
         return self.preference_matrix
 
+    def _is_cached_matrix_compatible(self) -> bool:
+        """Valida que la matriz cacheada sigue alineada con usuarios activos y géneros."""
+        if self.preference_matrix is None:
+            return False
+
+        active_users = sum(
+            1
+            for user in self.user_registry["users"].values()
+            if user.get("status") == "active"
+        )
+        expected_genres = len(self.genre_map)
+
+        return (
+            self.preference_matrix.shape[0] == active_users
+            and self.preference_matrix.shape[1] == expected_genres
+            and len(self.user_id_to_idx) == active_users
+        )
+
     def _rebuild_user_mappings(self):
         """Reconstruye los mapeos user_id <-> índice cuando la matriz se carga de disco."""
+        self.user_id_to_idx = {}
+        self.idx_to_user_id = {}
         idx = 0
         for uid, user in self.user_registry["users"].items():
             if user.get("status") != "active":
@@ -136,12 +162,14 @@ class ColaborativeRecommender:
             return []
 
         if "neighbors" in user_data and user_data["neighbors"]:
-            neighbors = [
+            raw_neighbors = [
                 (n["user_id"], n["similarity"]) for n in user_data["neighbors"]
             ]
         else:
             self.get_preference_matrix()
-            neighbors = self._find_neighbors(user_id)
+            raw_neighbors = self._find_neighbors(user_id)
+
+        neighbors = self._normalize_neighbors(raw_neighbors)
 
         if not neighbors:
             return []
@@ -168,12 +196,14 @@ class ColaborativeRecommender:
             return {"error": "Usuario no encontrado"}
 
         if "neighbors" in user_data and user_data["neighbors"]:
-            neighbors = [
+            raw_neighbors = [
                 (n["user_id"], n["similarity"]) for n in user_data["neighbors"]
             ]
         else:
             self.get_preference_matrix()
-            neighbors = self._find_neighbors(user_id)
+            raw_neighbors = self._find_neighbors(user_id)
+
+        neighbors = self._normalize_neighbors(raw_neighbors)
 
         contributors = []
         for neighbor_id, sim, _ in neighbors:
@@ -208,6 +238,26 @@ class ColaborativeRecommender:
             "num_contributors": len(contributors),
             "contributors": contributors,
         }
+
+    def _normalize_neighbors(
+        self, neighbors: Iterable[Tuple[Any, ...]]
+    ) -> List[Tuple[str, float, Optional[np.ndarray]]]:
+        """Normaliza vecinos a tuplas (neighbor_id, similarity, other_vec)."""
+        normalized_neighbors: List[Tuple[str, float, Optional[np.ndarray]]] = []
+        for neighbor in neighbors:
+            if len(neighbor) == 3:
+                neighbor_id, similarity, other_vec = neighbor
+            elif len(neighbor) == 2:
+                neighbor_id, similarity = neighbor
+                other_vec = None
+            else:
+                continue
+
+            normalized_neighbors.append(
+                (str(neighbor_id), float(similarity), other_vec)
+            )
+
+        return normalized_neighbors
 
     def _pearson_similarity(self, vec_a: np.ndarray, vec_b: np.ndarray) -> float:
         """
