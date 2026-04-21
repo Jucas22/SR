@@ -70,27 +70,53 @@ class AppManager:
     def _render_recommendations(self):
         """Mostrar recomendaciones personalizadas"""
         st.subheader("🎯 Películas Recomendadas para Ti")
-
-        # Casillas para activar cada motor de recomendación de forma independiente.
-        use_content_recommender = st.checkbox(
-            "SR Basado en Contenido",
-            value=False,
-            key="use_content_recommender",
-        )
-        use_colaborative_recommender = st.checkbox(
-            "SR Colaborativo",
-            value=False,
-            key="use_colaborative_recommender",
-        )
-
-        if not use_content_recommender and not use_colaborative_recommender:
-            st.info("Activa alguna casilla para generar recomendaciones.")
-            return
-
-        user_id = self.auth_manager.get_current_user_id()
-
-        # Controles
+        
+        # Selector de tipo de recomendador
         col1, col2 = st.columns([2, 1])
+        with col1:
+            recommender_type = st.selectbox(
+                "Selecciona un sistema recomendador:",
+                options=["content", "collaborative", "hybrid"],
+                format_func=lambda x: {
+                    "content": "📚 Basado en Contenido",
+                    "collaborative": "👥 Colaborativo",
+                    "hybrid": "🔄 Híbrido"
+                }.get(x, x),
+                key="recommender_type_selector"
+            )
+        
+        with col2:
+            st.write("")  # Espaciador para alineación
+            enable_recommender = st.checkbox("Activar", value=True, key="enable_recommender")
+        
+        if not enable_recommender:
+            st.info("✓ Selecciona 'Activar' para generar recomendaciones con el sistema elegido.")
+            return
+        
+        user_id = self.auth_manager.get_current_user_id()
+        
+        # Mostrar información del sistema seleccionado
+        if recommender_type == "content":
+            st.info("📚 **Basado en Contenido**: Recomendaciones según géneros, palabras clave y características de películas que te gustaron.")
+        elif recommender_type == "collaborative":
+            st.info("👥 **Colaborativo**: Recomendaciones basadas en usuarios similares a ti y sus preferencias.")
+        else:  # hybrid
+            st.info("🔄 **Híbrido**: Combinación de recomendaciones basadas en contenido y colaborativas para mayor precisión.")
+        
+        # Inicializar recomendador
+        self.data_manager.ensure_recommender_initialized(recommender_type)
+        
+        # Verificar si el recomendador está disponible
+        if self.data_manager.recommender is None:
+            st.warning(
+                "⚠️ El recomendador no está disponible en este momento. "
+                "La app seguirá funcionando, pero sin recomendaciones personalizadas."
+            )
+            st.info("💡 Puedes explorar manualmente en la sección 'Explorar' y aún así guardar tus ratings.")
+            return
+        
+        # Controles
+        col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
             num_recommendations = st.slider(
                 "¿Cuántas recomendaciones quieres?",
@@ -101,75 +127,52 @@ class AppManager:
             )
 
         with col2:
-            exclude_seen = st.checkbox("Excluir vistas", value=True)
-
-        # Mostrar recomendaciones en grid
-        cols_per_row = st.selectbox(
-            "Columnas:",
-            options=[2, 3, 4, 5],
-            index=2,
-            key="rec_cols",
+            # Solo mostrar "Excluir vistas" para basado en contenido
+            if recommender_type == "content":
+                exclude_seen = st.checkbox("Excluir vistas", value=True)
+            else:
+                exclude_seen = False
+                st.write("")  # Espaciador
+        
+        with col3:
+            st.write("")  # Espaciador para alineación
+        
+        # Obtener recomendaciones
+        recommendations_df = self.data_manager.get_recommendations(
+            user_id,
+            top_k=num_recommendations,
+            exclude_seen=exclude_seen,
+            recommender_type=recommender_type
         )
-
-        if use_content_recommender:
-            self.data_manager.ensure_recommender_initialized()
-            if self.data_manager.recommender is None:
-                st.warning(
-                    "⚠️ El recomendador basado en contenido no está disponible en este momento."
-                )
-            else:
-                recommendations_df = self.data_manager.get_recommendations(
-                    user_id,
-                    top_k=num_recommendations,
-                    exclude_seen=exclude_seen,
-                )
-
-                st.markdown("### 🧠 Recomendaciones Basadas en Contenido")
-                if recommendations_df is not None and not recommendations_df.empty:
-                    st.info(
-                        f"✨ {len(recommendations_df)} recomendaciones basadas en tu perfil de contenido"
-                    )
-
-                    movies_to_show = []
-                    for _, rec in recommendations_df.iterrows():
-                        movie_id = int(rec["movie_id"])
-                        if str(movie_id) in self.data_manager.movies:
-                            movie_data = self.data_manager.movies[str(movie_id)]
-                            movie_data["_score"] = rec["score"]
-                            movie_data["_reasons"] = rec["reasons"]
-                            movies_to_show.append((movie_id, movie_data))
-
-                    if movies_to_show:
-                        self._render_recommendations_grid(movies_to_show, cols_per_row)
-                    else:
-                        st.info(
-                            "No se encontraron películas disponibles para estas recomendaciones."
-                        )
-                else:
-                    st.info(
-                        "📌 No hay suficientes datos para generar recomendaciones basadas en contenido."
-                    )
-
-        if use_colaborative_recommender:
-            st.markdown("### 🤝 Recomendaciones del SR Colaborativo")
-            colaborative_recs = self.data_manager.get_colaborative_recommendations(
-                user_id=user_id,
-                top_k=num_recommendations,
+        
+        if recommendations_df is not None and not recommendations_df.empty:
+            st.info(f"✨ {len(recommendations_df)} películas recomendadas especialmente para ti")
+            
+            # Mostrar recomendaciones en grid
+            cols_per_row = st.selectbox(
+                "Columnas:",
+                options=[2, 3, 4, 5],
+                index=2,
+                key="rec_cols"
             )
-
-            if colaborative_recs:
-                st.info(
-                    f"👥 {len(colaborative_recs)} recomendaciones basadas en usuarios similares"
-                )
-                self._render_colaborative_recommendations_grid(
-                    user_id=user_id,
-                    recommendations=colaborative_recs,
-                    cols_per_row=cols_per_row,
-                )
-            else:
-                st.info(
-                    "📌 No hay suficientes vecinos para generar recomendaciones colaborativas todavía."
-                )
+            
+            movies_to_show = []
+            for _, rec in recommendations_df.iterrows():
+                movie_id = int(rec["movie_id"])
+                if str(movie_id) in self.data_manager.movies:
+                    movie_data = self.data_manager.movies[str(movie_id)]
+                    movie_data["_score"] = rec["score"]
+                    movie_data["_reasons"] = rec["reasons"]
+                    movies_to_show.append((movie_id, movie_data))
+            
+            if movies_to_show:
+                self._render_recommendations_grid(movies_to_show, cols_per_row)
+        else:
+            st.info(
+                "📌 No hay suficientes datos para generar recomendaciones personalizadas. "
+                "¡Comienza a calificar películas para obtener mejores recomendaciones!"
+            )
+            st.info("💡 Ve a la sección 'Explorar' y califica algunas películas que hayas visto.")
 
     def _render_recommendations_grid(self, movies_list, cols_per_row=4):
         """Renderizar grid de recomendaciones"""
