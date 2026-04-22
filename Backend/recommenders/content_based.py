@@ -15,6 +15,7 @@ Mejoras incluidas respecto a la versión original:
 - Tolera esquemas parcialmente distintos.
 """
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import json
@@ -32,6 +33,29 @@ from sklearn.preprocessing import MultiLabelBinarizer
 
 PathLike = Union[str, bytes]
 DataLike = Union[pd.DataFrame, PathLike]
+
+GENRE_ID_TO_NAME = {
+    12: "Aventura",
+    14: "Fantasia",
+    16: "Animacion",
+    18: "Drama",
+    27: "Terror",
+    28: "Accion",
+    35: "Comedia",
+    36: "Historica",
+    37: "Oeste",
+    53: "Suspense",
+    80: "Crimen",
+    99: "Documental",
+    878: "Ciencia ficcion",
+    9648: "Misterio",
+    10402: "Musical",
+    10749: "Romance",
+    10751: "Familiar",
+    10752: "Guerra",
+    10769: "Extranjera",
+    10770: "TV",
+}
 
 
 @dataclass
@@ -273,7 +297,7 @@ class ContentBasedRecommender:
             rows.append(
                 RecommendationResult(
                     movie_id=movie_id,
-                    title=str(movie_row.get("title", movie_id)),
+                    title=self._resolve_movie_title(movie_row),
                     score=float(scores[idx]),
                     genre_score=float(genre_scores[idx]),
                     text_score=float(text_scores[idx]),
@@ -371,67 +395,124 @@ class ContentBasedRecommender:
                 self.global_user_profiles[user_id] = profile
 
     def explain_recommendation(self, user_id: int, movie_id: int, top_n_reasons: int = 5) -> List[str]:
-        """Explicación simple basada en géneros, overview y similitud con visto."""
+        """Explicación legible basada en géneros, temas y películas del historial."""
         self._check_is_fitted()
 
         if movie_id not in self.movie_id_to_idx:
             return ["Película no encontrada en el catálogo."]
 
         reasons: List[str] = []
-        seen = self.get_seen_movies(user_id)
         target_idx = self.movie_id_to_idx[movie_id]
         target_row = self.movies.iloc[target_idx]
 
         reduced_genres = self.get_reduced_user_genre_preferences(user_id)
-        target_genres = self._safe_split_multi_value(target_row.get("generos", []))
-        target_genres_norm = [self._canonicalize_genre(g) for g in target_genres]
+        target_genres = [
+            genre
+            for genre in (
+                self._canonicalize_genre_token(value)
+                for value in self._safe_split_multi_value(target_row.get("generos", []))
+            )
+            if genre
+        ]
+        target_topics = self._extract_reason_topics(target_row)
 
-        common_genres = [g for g in reduced_genres.keys() if g in target_genres_norm]
-        if common_genres:
+        common_genres = [genre for genre in reduced_genres.keys() if genre in target_genres]
+        user_topics = self._get_user_topic_preferences(user_id)
+        user_topics_set = set(user_topics)
+        common_topics = [topic for topic in target_topics if topic in user_topics_set]
+
+        if common_genres and common_topics:
             reasons.append(
-                f"Coincide con tus géneros principales: {', '.join(common_genres[:3])}."
+                "Encaja con tu perfil porque combina géneros que suelen gustarte, como "
+                f"{self._format_human_list(common_genres[:3])}, y temas recurrentes en tu historial, "
+                f"como {self._format_human_list(common_topics[:3])}."
+            )
+        elif common_genres:
+            reasons.append(
+                "Encaja con tu perfil porque comparte tus géneros preferidos, como "
+                f"{self._format_human_list(common_genres[:3])}."
+            )
+        elif common_topics:
+            reasons.append(
+                "Encaja con tu perfil porque trata temas que aparecen con frecuencia en tu historial, como "
+                f"{self._format_human_list(common_topics[:3])}."
+            )
+        elif target_topics:
+            reasons.append(
+                "Su contenido se parece al tipo de historias que sueles consumir, con temas como "
+                f"{self._format_human_list(target_topics[:3])}."
             )
 
-        target_tags = self._safe_split_multi_value(target_row.get("tags", []))
-        if target_tags:
-            reasons.append(
-                f"Incluye etiquetas relevantes: {', '.join([str(x) for x in target_tags[:3]])}."
-            )
-
-        if "overview" in self.movies.columns and pd.notna(target_row.get("overview")):
-            overview = str(target_row.get("overview")).strip()
-            if overview:
-                snippet = overview[:140] + ("..." if len(overview) > 140 else "")
-                reasons.append(f"Su contenido encaja con tu perfil temático: {snippet}")
-
-        similar_seen_title = None
         best_sim = -1.0
-        for seen_id in seen:
-            if seen_id not in self.movie_id_to_idx:
+        similar_seen_row = None
+        for seen_id in self._get_user_reference_movies(user_id):
+            if seen_id not in self.movie_id_to_idx or int(seen_id) == int(movie_id):
                 continue
             seen_idx = self.movie_id_to_idx[seen_id]
             sim = cosine_similarity(
                 self.item_feature_matrix[target_idx],
-                self.item_feature_matrix[seen_idx]
+                self.item_feature_matrix[seen_idx],
             )[0, 0]
             if sim > best_sim:
                 best_sim = sim
-                similar_seen_title = self.movies.iloc[seen_idx].get("title")
+                similar_seen_row = self.movies.iloc[seen_idx]
 
-        if similar_seen_title is not None:
-            reasons.append(f"Es parecida a una película que ya viste: {similar_seen_title}.")
+        if similar_seen_row is not None and best_sim > 0.05:
+            seen_title = self._resolve_movie_title(similar_seen_row)
+            seen_genres = [
+                genre
+                for genre in (
+                    self._canonicalize_genre_token(value)
+                    for value in self._safe_split_multi_value(similar_seen_row.get("generos", []))
+                )
+                if genre
+            ]
+            seen_topics = self._extract_reason_topics(similar_seen_row)
+            seen_genres_set = set(seen_genres)
+            seen_topics_set = set(seen_topics)
+            shared_genres = [genre for genre in target_genres if genre in seen_genres_set]
+            shared_topics = [topic for topic in target_topics if topic in seen_topics_set]
 
-        quality_parts = []
-        for col in ["vote_average", "imdb_rating", "tmdb_score", "popularity"]:
-            if col in self.movies.columns and pd.notna(target_row.get(col)):
-                quality_parts.append(f"{col}={target_row.get(col)}")
-        if quality_parts:
-            reasons.append("También destaca por calidad/popularidad: " + ", ".join(quality_parts[:2]) + ".")
+            if shared_genres and shared_topics:
+                reasons.append(
+                    f"Se parece a '{seen_title}', que ya viste, porque comparte géneros como "
+                    f"{self._format_human_list(shared_genres[:3])} y temas como "
+                    f"{self._format_human_list(shared_topics[:3])}."
+                )
+            elif shared_genres:
+                reasons.append(
+                    f"Se parece a '{seen_title}', que ya viste, por su mezcla de "
+                    f"{self._format_human_list(shared_genres[:3])}."
+                )
+            elif shared_topics:
+                reasons.append(
+                    f"Se parece a '{seen_title}', que ya viste, porque ambas trabajan temas como "
+                    f"{self._format_human_list(shared_topics[:3])}."
+                )
+            else:
+                reasons.append(
+                    f"Se parece a '{seen_title}', una película de tu historial con contenido muy cercano."
+                )
+
+        quality_reason = self._build_quality_reason(target_idx, target_row)
+        if quality_reason:
+            reasons.append(quality_reason)
 
         if not reasons:
-            reasons.append("Alta similitud de contenido con tu perfil.")
+            reasons.append(
+                "Su combinación de género y contenido es cercana a las películas de tu historial."
+            )
 
-        return reasons[:top_n_reasons]
+        unique_reasons: List[str] = []
+        seen_reasons = set()
+        for reason in reasons:
+            normalized = reason.strip()
+            if not normalized or normalized in seen_reasons:
+                continue
+            seen_reasons.add(normalized)
+            unique_reasons.append(normalized)
+
+        return unique_reasons[:top_n_reasons]
 
     def get_seen_movies(self, user_id: int) -> set:
         """Películas vistas/puntuadas por el usuario."""
@@ -494,11 +575,31 @@ class ContentBasedRecommender:
             raise ValueError("movies debe contener una columna 'movieId' o 'id'.")
 
         if "title" not in movies.columns:
-            movies["title"] = movies[self.movie_id_col].astype(str)
+            movies["title"] = ""
 
         for col in set(self.feature_text_columns + self.categorical_columns):
             if col not in movies.columns:
                 movies[col] = ""
+
+        title_candidates = ["title", "titulo", "original_title"]
+        normalized_title = pd.Series([""] * len(movies), index=movies.index, dtype=object)
+        for col in title_candidates:
+            if col not in movies.columns:
+                continue
+            candidate = (
+                movies[col]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+                .replace({"nan": "", "None": "", "none": ""})
+            )
+            normalized_title = normalized_title.where(normalized_title.astype(str).str.strip() != "", candidate)
+
+        normalized_title = normalized_title.where(
+            normalized_title.astype(str).str.strip() != "",
+            movies[self.movie_id_col].astype(str),
+        )
+        movies["title"] = normalized_title
 
         movies = movies.drop_duplicates(subset=[self.movie_id_col]).reset_index(drop=True)
         movies[self.movie_id_col] = movies[self.movie_id_col].astype(int)
@@ -509,7 +610,14 @@ class ContentBasedRecommender:
 
         if "generos" in movies.columns:
             movies["generos"] = movies["generos"].apply(
-                lambda vals: [self._canonicalize_genre(v) for v in self._safe_split_multi_value(vals)]
+                lambda vals: [
+                    genre
+                    for genre in (
+                        self._canonicalize_genre_token(v)
+                        for v in self._safe_split_multi_value(vals)
+                    )
+                    if genre
+                ]
             )
 
         return movies
@@ -641,7 +749,15 @@ class ContentBasedRecommender:
         try:
             assert self.movies is not None
 
-            candidate_cols = ["vote_average", "imdb_rating", "tmdb_score", "mean_rating", "avg_rating"]
+            candidate_cols = [
+                "vote_average",
+                "vote_average_tmdb",
+                "imdb_rating",
+                "tmdb_score",
+                "puntuacion_media",
+                "mean_rating",
+                "avg_rating",
+            ]
             available = [c for c in candidate_cols if c in self.movies.columns]
 
             if not available:
@@ -898,6 +1014,166 @@ class ContentBasedRecommender:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _canonicalize_genre_token(self, genre: Any) -> str:
+        if genre is None or (isinstance(genre, float) and math.isnan(genre)):
+            return ""
+
+        if isinstance(genre, (int, np.integer)):
+            return self._canonicalize_genre(GENRE_ID_TO_NAME.get(int(genre), str(int(genre))))
+
+        if isinstance(genre, float) and float(genre).is_integer():
+            genre_id = int(genre)
+            return self._canonicalize_genre(GENRE_ID_TO_NAME.get(genre_id, str(genre_id)))
+
+        text = str(genre).strip()
+        if not text:
+            return ""
+        if text.isdigit():
+            genre_id = int(text)
+            text = GENRE_ID_TO_NAME.get(genre_id, text)
+        return self._canonicalize_genre(text)
+
+    def _resolve_movie_title(self, row: pd.Series) -> str:
+        for key in ("title", "titulo", "original_title", "name"):
+            if key not in row.index:
+                continue
+            value = row.get(key)
+            if value is None or (isinstance(value, float) and math.isnan(value)):
+                continue
+            text = str(value).strip()
+            if text and text.lower() not in {"nan", "none", "null"}:
+                return text
+
+        movie_id = row.get(self.movie_id_col, row.get("id", ""))
+        if pd.notna(movie_id):
+            return str(movie_id)
+        return "Sin titulo"
+
+    def _clean_reason_token(self, value: Any) -> str:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return ""
+
+        text = str(value).strip()
+        if not text:
+            return ""
+
+        text = text.replace("_", " ").replace("-", " ")
+        text = re.sub(r"\s+", " ", text).strip(" .,:;")
+        if not text or text.lower() in {"nan", "none", "null"}:
+            return ""
+        if text.isdigit() or len(text) < 3:
+            return ""
+        return text.lower()
+
+    def _extract_reason_topics(self, row: pd.Series, max_items: int = 8) -> List[str]:
+        topics: List[str] = []
+        seen_topics = set()
+
+        for col in ("keywords", "tags"):
+            if col not in row.index:
+                continue
+            for raw_value in self._safe_split_multi_value(row.get(col, [])):
+                topic = self._clean_reason_token(raw_value)
+                if not topic:
+                    continue
+                topic_key = unicodedata.normalize("NFKD", topic).encode("ascii", "ignore").decode("utf-8")
+                if topic_key in seen_topics:
+                    continue
+                seen_topics.add(topic_key)
+                topics.append(topic)
+                if len(topics) >= max_items:
+                    return topics
+
+        return topics
+
+    def _get_user_reference_movies(self, user_id: int) -> List[int]:
+        if self.ratings is not None and not self.ratings.empty:
+            user_ratings = self.ratings[self.ratings[self.user_id_col] == user_id].copy()
+            user_ratings = user_ratings[user_ratings[self.movie_id_col].isin(self.movie_id_to_idx)]
+            if not user_ratings.empty:
+                positive_ratings = user_ratings[user_ratings["rating"] >= self.rating_threshold_like].copy()
+                reference_ratings = positive_ratings if not positive_ratings.empty else user_ratings
+
+                sort_columns = ["rating"]
+                ascending = [False]
+                if "timestamp" in reference_ratings.columns:
+                    sort_columns.append("timestamp")
+                    ascending.append(False)
+
+                reference_ratings = reference_ratings.sort_values(
+                    sort_columns,
+                    ascending=ascending,
+                    na_position="last",
+                )
+                movie_ids = reference_ratings[self.movie_id_col].astype(int).tolist()
+                return list(dict.fromkeys(movie_ids))
+
+        return sorted(int(movie_id) for movie_id in self.get_seen_movies(user_id))
+
+    def _get_user_topic_preferences(self, user_id: int, max_topics: int = 12) -> List[str]:
+        topic_counter: Counter[str] = Counter()
+        reference_movies = self._get_user_reference_movies(user_id)
+
+        for movie_id in reference_movies[:25]:
+            if movie_id not in self.movie_id_to_idx:
+                continue
+            row = self.movies.iloc[self.movie_id_to_idx[movie_id]]
+            for rank, topic in enumerate(self._extract_reason_topics(row, max_items=6)):
+                topic_counter[topic] += max(1, 6 - rank)
+
+        return [topic for topic, _ in topic_counter.most_common(max_topics)]
+
+    def _format_human_list(self, values: Sequence[str]) -> str:
+        cleaned: List[str] = []
+        seen_values = set()
+
+        for value in values:
+            text = str(value).strip()
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen_values:
+                continue
+            seen_values.add(key)
+            cleaned.append("TV" if key == "tv" else text)
+
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} y {cleaned[1]}"
+        return f"{', '.join(cleaned[:-1])} y {cleaned[-1]}"
+
+    def _build_quality_reason(self, target_idx: int, target_row: pd.Series) -> Optional[str]:
+        score_columns = [
+            ("vote_average_tmdb", "TMDb", 10),
+            ("vote_average", "TMDb", 10),
+            ("tmdb_score", "TMDb", 10),
+            ("imdb_rating", "IMDb", 10),
+            ("puntuacion_media", "el catalogo", 5),
+            ("mean_rating", "el catalogo", 5),
+            ("avg_rating", "el catalogo", 5),
+        ]
+
+        for col, source, max_scale in score_columns:
+            if col not in target_row.index or pd.isna(target_row.get(col)):
+                continue
+            value = pd.to_numeric(pd.Series([target_row.get(col)]), errors="coerce").iloc[0]
+            if pd.isna(value) or float(value) <= 0:
+                continue
+
+            if source == "el catalogo":
+                return f"Ademas, mantiene una valoracion media de {float(value):.1f}/{max_scale} dentro del catalogo."
+            return f"Ademas, cuenta con una valoracion media de {float(value):.1f}/{max_scale} en {source}."
+
+        if self.popularity_signal_ is not None and target_idx < len(self.popularity_signal_):
+            popularity_score = float(self.popularity_signal_[target_idx])
+            if popularity_score >= 0.75:
+                return "Ademas, tambien destaca por su popularidad dentro del catalogo."
+
+        return None
+
     def _normalize_multi_value_field(self, value: Any) -> List[str]:
         if value is None or (isinstance(value, float) and math.isnan(value)):
             return []
@@ -944,15 +1220,15 @@ class ContentBasedRecommender:
             "histórica": "historica",
             "ciencia ficcion": "ciencia ficcion",
             "ciencia ficción": "ciencia ficcion",
-            "pelicula de tv": "pelicula de tv",
+            "pelicula de tv": "tv",
             "foreign": "extranjera",
             "thriller": "suspense",
-            "war": "belica",
+            "war": "guerra",
             "music": "musical",
-            "tv movie": "pelicula de tv",
+            "tv movie": "tv",
             "mystery": "misterio",
             "science fiction": "ciencia ficcion",
-            "family": "familia",
+            "family": "familiar",
         }
 
         g = replacements.get(g, g)

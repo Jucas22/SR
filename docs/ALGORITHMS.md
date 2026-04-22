@@ -17,6 +17,11 @@ Recomienda peliculas parecidas a los gustos del usuario analizando las caracteri
 - `crew`
 - `director`
 
+Antes de construir el modelo, los generos se normalizan para que las peliculas y
+el `genre_vector` del usuario usen el mismo vocabulario. Esto es importante
+porque en el dataset las peliculas pueden traer los generos como IDs y el perfil
+del usuario los guarda como nombres legibles.
+
 ### Perfil del usuario
 
 Se construye combinando:
@@ -25,11 +30,20 @@ Se construye combinando:
 - el historial de ratings del usuario
 - las peliculas vistas como fallback para cold start
 
+El perfil de generos se reduce ademas a los 5-8 generos mas representativos para
+evitar ruido, mientras que el perfil historico se obtiene como una media
+ponderada de las peliculas valoradas por el usuario.
+
 ### Espacio de items
 
 - Los generos se codifican con `MultiLabelBinarizer`
 - El texto se vectoriza con `TF-IDF`
 - La similitud se calcula con coseno
+
+Esto permite separar dos tipos de afinidad:
+
+- afinidad estructural por genero
+- afinidad semantica por texto y metadatos
 
 ### Formula general
 
@@ -42,6 +56,21 @@ score =
   + w_quality * quality
   + w_popularity * popularity
 ```
+
+### Explicabilidad
+
+La explicacion visible en frontend no se basa ya en mostrar la sinopsis recortada.
+Ahora prioriza:
+
+- generos compartidos con el perfil del usuario
+- temas compartidos detectados en `keywords` y `tags`
+- una pelicula puente del historial del usuario que sea similar a la recomendada
+
+### Documentacion detallada
+
+Para la explicacion completa pensada para memoria o presentacion:
+
+- [docs/CONTENT_BASED_RECOMMENDER.md](</c:/Users/juanc/Documents/UPV/Master/SR/docs/CONTENT_BASED_RECOMMENDER.md>)
 
 ### Ventajas
 
