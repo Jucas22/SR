@@ -376,19 +376,35 @@ class DataManager(LegacyDataManager):
         breakdown_consistent: bool,
     ):
         """Genera una explicacion breve y legible para las tarjetas colaborativas."""
-        contributor_label = "usuario parecido" if num_contributors == 1 else "usuarios parecidos"
         confidence_label = self._get_confidence_label(confidence)
         if breakdown_consistent:
+            if num_contributors == 1:
+                audience_line = (
+                    "Esta pelicula se te recomienda porque hay 1 usuario con gustos "
+                    "parecidos que la ha visto"
+                )
+            else:
+                audience_line = (
+                    "Esta pelicula se te recomienda porque hay "
+                    f"{num_contributors} usuarios con gustos parecidos que la han visto"
+                )
+
+            if positive_contributors == 1:
+                positive_line = "y 1 de ellos la ha valorado con una buena puntuacion."
+            else:
+                positive_line = (
+                    f"y {positive_contributors} de ellos la han valorado "
+                    "con una buena puntuacion."
+                )
+
             breakdown_line = (
-                f"La han visto {num_contributors} {contributor_label}: "
-                f"{positive_contributors} la valoraron bien, "
-                f"{neutral_contributors} de forma tibia y "
-                f"{negative_contributors} negativamente."
+                f"{audience_line}, {positive_line}"
             )
         else:
             breakdown_line = (
-                f"La han visto {num_contributors} {contributor_label}. "
-                "El desglose detallado de valoraciones no estaba disponible."
+                "Esta pelicula se te recomienda porque hay "
+                f"{num_contributors} usuarios con gustos parecidos que la han visto. "
+                "El desglose detallado de sus valoraciones no estaba disponible."
             )
         return [
             f"Confianza {confidence_label.lower()}: {confidence:.0%}.",
