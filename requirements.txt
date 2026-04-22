@@ -1,5 +1,7 @@
 pandas
+numpy
 streamlit
 requests
+aiohttp
 scipy
 scikit-learn

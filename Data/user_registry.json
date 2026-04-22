@@ -4,7 +4,7 @@
     "total_users": 672,
     "active_users": 672,
     "created_date": "2026-03-11",
-    "last_updated": "2026-03-20"
+    "last_updated": "2026-04-22"
   },
   "users": {
     "1": {
@@ -54242,7 +54242,14 @@
           "Comedia",
           "Terror"
         ],
-        "watched_movies": []
+        "watched_movies": [],
+        "genre_vector": {
+          "Acción": 100.0,
+          "Aventura": 100.0,
+          "Ciencia ficción": 100.0,
+          "Comedia": 100.0,
+          "Terror": 100.0
+        }
       },
       "statistics": {
         "avg_rating": 0.0,
@@ -54255,8 +54262,8 @@
       "name": "Juan Castelló",
       "status": "active",
       "created_date": "2026-03-20",
-      "last_activity": "2026-03-20",
-      "total_ratings": 1,
+      "last_activity": "2026-04-22",
+      "total_ratings": 17,
       "user_type": "new",
       "preferences": {
         "favorite_genres": [
@@ -54265,12 +54272,44 @@
           "Romance"
         ],
         "watched_movies": [
-          120
-        ]
+          120,
+          157336,
+          324786,
+          489,
+          74308,
+          192,
+          841,
+          43818,
+          550,
+          25527,
+          9919,
+          58574,
+          10528,
+          11631,
+          75656,
+          291805,
+          640
+        ],
+        "genre_vector": {
+          "Animaci¢n": 25.0,
+          "Drama": 100.0,
+          "Romance": 50.0,
+          "Aventura": 50.0,
+          "Fantas¡a": 8.33,
+          "Acción": 41.67,
+          "Ciencia ficción": 16.67,
+          "Historica": 8.33,
+          "Guerra": 8.33,
+          "Suspense": 25.0,
+          "Misterio": 33.33,
+          "TV": 8.33,
+          "Comedia": 25.0,
+          "Crimen": 41.67
+        }
       },
       "statistics": {
         "avg_rating": 0.0,
-        "rating_count": 1,
+        "rating_count": 17,
         "active_since": "2026-03-20"
       }
     }

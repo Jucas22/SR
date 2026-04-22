@@ -1,11 +1,6 @@
 import streamlit as st
-import sys
-from pathlib import Path
 
-# # Agregar el directorio backend al path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from Backend.user_registry_manager import UserRegistryManager
+from Backend.services import UserRegistryManager
 
 
 class AuthManager:
@@ -105,11 +100,15 @@ class AuthManager:
                     user_preferences=user_preferences,
                     user_name=user_name if user_name.strip() else None,
                 )
+                if hasattr(self.data_manager, "user_registry_manager"):
+                    self.data_manager.user_registry_manager.reload_registry()
 
                 # Iniciar sesión automáticamente
                 st.session_state.logged_in = True
                 st.session_state.user_id = new_user_id
-                st.session_state.user_data = self.user_manager.get_user(new_user_id)
+                st.session_state.user_data = self.data_manager.user_registry_manager.get_user(
+                    new_user_id
+                )
 
                 st.success(f"¡Usuario creado con ID: {new_user_id}!")
                 st.balloons()

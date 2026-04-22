@@ -1,55 +1,211 @@
-# Trabajo de la Asignatura de Sistemas Recomendadores.
+# Sistemas Recomendadores de Peliculas
 
-## Primera parte: division del dataset
+Proyecto de la asignatura de Sistemas Recomendadores orientado a recomendar peliculas mediante tres enfoques:
 
-En esta primera parte debemos preparar el sistema para posteriormente empezar a implementar los sitemas recomendadores. Primero empezaremos generando el grupo de usuarios test y el grupo de train.
+- Recomendador basado en contenido
+- Recomendador colaborativo
+- Recomendador hibrido
 
-Cogemos todos los usuarios del sistema (fichero de Data_set/ratings_small.csv) y los dividimos en entranmiento y test, 70% y 30% respectivamente. De esta manera, tras realizar el sistema recomendador podremos evaluar su calidad utilizando el test, comprobando la recomendacion que nos ofrece el SR y el rating real que le ha dado el usuario.
+El repositorio incluye un backend con la logica de recomendacion, un frontend en Streamlit para explorar peliculas y recibir recomendaciones, y varios scripts para preparar y enriquecer los datos.
 
-Perfil del usuario:
+## Estado actual
 
-- Demografia: NO SE TNDRÁ EN CUENTA EN ESTE TRABAJO
-- Preferencias del usuario: genero de peliculas y la puntuacion de cada una de las pelis.
-- Historico de interacciones: que le ha gustado, que ha visto, que no...
-- Informacion interna del SR: que algoritmos se han usado, que resultados han dado, etc.
+Se ha reorganizado el proyecto para separar mejor:
 
-**Para el usuario de la DB:**
-Se tendráe en cuenta la lista de peliculas puntuadas de cada usuario y la clasificacion de peliculas por genero de cada una de ellas. Con esto se va infiriendo a que grado le gusta cada genero, y se le pueden recomendar peliculas de ese genero. Con eso se puede obtener un vector de preferencias del usuario, con un valor para cada genero. Se puede hacer lo mismo con los actores, directores, etc.
+- `Backend/`: algoritmos y servicios del dominio
+- `Frontend/`: interfaz Streamlit y gestores de UI
+- `scripts/`: scripts operativos y pruebas manuales
+- `Data/`: datasets y artefactos generados
+- `docs/`: documentacion de arquitectura y algoritmos
 
-TODO: decision de como rellenar el vector de preferencias del usuario, de la DB. Intentar tener un valor para cada uno de los generos, sin embargo, si tenemos todo rellenado puede haber un problema a la hora de recomendar pelculas. Por tanto, a la hora de recomendar en vez de utilizar todo el vector, se utilizará por ejemplo las mejores 5 generos posibles. De esta forma, habrá una mayor distintición entre generos.
-Usar datos de training para rellenar el vector de preferencias del usuario, y luego usar ese vector para recomendar peliculas en el test. De esta forma, se puede evaluar la calidad de las recomendaciones.
+Los antiguos puntos de entrada se mantienen como wrappers para no romper rutas previas.
 
-**Para los usuarios que se registren**, habra que preguntarle direcatmente sus preferencias en el registro.
+## Estructura recomendada
 
-**Lista de recomendaciones: (futuras partes)** sera una lista de peliculas que el usuario no ha visto y se le recomienda ver, ordenada por probabilidad o por algun cirterio de relevancia. Esta lista se le pasará tal cual a la UI y esta ya mostrará las peliculas al usuario, con la informcaion que necesite.
+```text
+.
+|- Backend/
+|  |- recommenders/
+|  |  |- content_based.py
+|  |  |- collaborative.py
+|  |  `- hybrid.py
+|  |- services/
+|  |  `- user_registry.py
+|  `- Colaborativo/
+|     `- preference_matrix.npz
+|- Frontend/
+|  |- services/
+|  |  |- app_data_manager.py
+|  |  `- data_manager.py
+|  |- ui/
+|  |  |- application_manager.py
+|  |  |- recommendations_mixin.py
+|  |  |- catalog_mixin.py
+|  |  |- user_mixin.py
+|  |  `- styles.py
+|  |- auth_manager.py
+|  `- main.py
+|- scripts/
+|  |- data/
+|  `- diagnostics/
+|- Data/
+|  |- Raw_data/
+|  |- Clean_data/
+|  `- user_registry.json
+`- docs/
+   |- ARCHITECTURE.md
+   `- ALGORITHMS.md
+```
 
-### Lo que se ha realizado:
+## Requisitos
 
-#### 1. **Limpieza y Transformación de Datos**
+Usa Python 3.11 o superior.
 
-Dividiendo ratings en train (70%) y test (30%)...
-Usuarios procesados: 670
-Usuarios con un solo rating (asignados a train): 0
-Ratings de entrenamiento: 22114
-Ratings de test: 9902
-Total: 32016 (original: 32016)
-Guardado: Data/Clean_data/train_ratings.json
-Guardado: Data/Clean_data/test_ratings.json
+Instalacion recomendada desde la raiz del proyecto:
 
-Que se a a;adido al trabajo original: - Se ha actualizado la info de las pelis y se ha a;adido mas campos como el overwiew, produccion, y algunas cosas mas
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-**Resultado de este paso**:
+Nota:
 
-- **tes_ratings.json and train_ratings.json:** dos ficheros con la informacion de los ratings de cada usuario, divididos en train y test. Cada rating tiene el id del usuario, el id de la pelicula, y la puntuacion que le ha dado el usuario a esa pelicula.
-- **user_registry.json:** un fichero con la informacion de cada usuario, con su id, su lista de peliculas puntuadas, y su vector de preferencias (con un valor para cada genero). Este fichero se usará posteriormente para recomendar peliculas a los usuarios. SOLO continene informacion de Train.
-  - User vector: se ha decidido rellenar el vector de preferencias mediante **acumulación ponderada positiva normalizada a [0, 100]**:
-    1. Para cada usuario se calcula su rating medio: $\bar{r}_u = \frac{1}{|R_u|}\sum_{i \in R_u} r_{u,i}$
-    2. Solo se consideran las películas con rating por encima de la media ($r_{u,i} > \bar{r}_u$), es decir, las que le gustaron más de lo habitual.
-    3. El peso de cada rating positivo es $w_{u,i} = r_{u,i} - \bar{r}_u$ y se distribuye equitativamente entre los géneros $G_i$ de la película: cada género recibe $\frac{w_{u,i}}{|G_i|}$.
-    4. Para cada género $g$ se calcula la afinidad media: $a_{u,g} = \frac{\sum_{i: g \in G_i} w_{u,i}/|G_i|}{|\{i : g \in G_i\}|}$
-    5. Se normaliza a [0, 100]: $v_{u,g} = \frac{a_{u,g}}{\max_g(a_{u,g})} \times 100$
-    - Se usan solo valores positivos [0, 100] porque así la similitud coseno queda acotada a [0, 1] (interpretable como porcentaje de afinidad), se evita la cancelación entre géneros, y es consistente con los pesos TF-IDF no-negativos del espacio de ítems
-- **enhanced_movies.json:** un fichero con la informacion de cada pelicula, con su id, su genero, su titulo, su sinopsis, etc. Este fichero se usará posteriormente para recomendar peliculas a los usuarios. En este fichero se ha añadido mas informacion que en el cleaned_movies.json, como el overview, la produccion, etc.
+- La carpeta `SR/` que aparece en el repo es un entorno virtual local ya existente.
+- No forma parte del codigo fuente ni de la arquitectura del proyecto.
 
+## Como ejecutar
 
-## SR colaborativo:
+### Frontend
+
+```bash
+streamlit run Frontend/main.py
+```
+
+### Diagnosticos manuales
+
+Recomendador basado en contenido:
+
+```bash
+python scripts/diagnostics/content_recommender_smoke.py
+```
+
+Recomendador colaborativo:
+
+```bash
+python scripts/diagnostics/collaborative_recommender_smoke.py
+```
+
+Tambien se conservan los wrappers heredados:
+
+```bash
+python test_recommender.py
+python Backend/Colaborativo/test_colaborativo.py
+```
+
+## Flujo de datos
+
+### 1. Datos crudos
+
+Los archivos base viven en `Data/Raw_data/`:
+
+- `peliculas.csv`
+- `ratings_small.csv`
+- `links.csv`
+- `keywords.csv`
+- `generos.csv`
+
+### 2. Procesado inicial
+
+```bash
+python scripts/data/process_data.py
+```
+
+Genera, entre otros:
+
+- `Data/Clean_data/cleaned_movies.json`
+- `Data/Clean_data/cleaned_ratings.json`
+- `Data/Clean_data/train_ratings.json`
+- `Data/Clean_data/test_ratings.json`
+
+### 3. Registro de usuarios
+
+```bash
+python scripts/data/initialize_user_registry.py
+```
+
+Genera o actualiza:
+
+- `Data/user_registry.json`
+
+### 4. Vector de preferencias por genero
+
+```bash
+python scripts/data/initialize_user_vector.py
+```
+
+Actualiza en el registro:
+
+- `favorite_genres`
+- `genre_vector`
+- estadisticas agregadas del usuario
+
+### 5. Enriquecimiento de peliculas con TMDb
+
+```bash
+python scripts/data/enrich_movies_tmdb.py
+```
+
+Genera o actualiza:
+
+- `Data/Clean_data/enhanced_movies.json`
+
+## Resumen de algoritmos
+
+### 1. Basado en contenido
+
+Se construye un espacio de items usando:
+
+- generos
+- overview
+- tagline
+- keywords
+- tags
+- reparto y direccion cuando estan disponibles
+
+El perfil del usuario combina:
+
+- `genre_vector` del registro de usuario
+- historial de ratings y peliculas vistas
+
+La puntuacion final mezcla similitud por genero, similitud textual, calidad y popularidad.
+
+### 2. Colaborativo
+
+Se calcula una matriz usuario-genero a partir del `genre_vector` de cada usuario.
+
+Despues:
+
+- se buscan vecinos similares con correlacion de Pearson
+- se recuperan items bien valorados por esos vecinos
+- se predice el rating del usuario con una media ponderada por similitud
+
+### 3. Hibrido
+
+Combina la puntuacion del recomendador basado en contenido y la del colaborativo con pesos configurables.
+
+## Documentacion adicional
+
+- Arquitectura: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Algoritmos: [docs/ALGORITHMS.md](docs/ALGORITHMS.md)
+- Colaborativo en detalle: [docs/COLLABORATIVE_RECOMMENDER.md](docs/COLLABORATIVE_RECOMMENDER.md)
+- Integracion previa: [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md)
+- Historial de cambios: [CHANGELOG.md](CHANGELOG.md)
+
+## Proximo paso recomendado
+
+Con esta base ya mas ordenada, el siguiente paso natural es revisar:
+
+- calidad de las implementaciones de los algoritmos
+- consistencia de nombres y esquemas de datos
+- como se explican y presentan las recomendaciones en el frontend
