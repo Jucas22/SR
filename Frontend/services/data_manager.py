@@ -304,6 +304,38 @@ class DataManager:
             traceback.print_exc()
             return None
 
+    def _build_available_genres(self):
+        """Precalcula la lista ordenada de géneros disponibles."""
+        genres = set()
+        for movie_data in self.movies.values():
+            if not isinstance(movie_data, dict):
+                continue
+            genre_ids = movie_data.get("generos", [])
+            if not isinstance(genre_ids, list):
+                continue
+            for gid in genre_ids:
+                genres.add(self.genre_mapping.get(gid, f"Género {gid}"))
+        return tuple(sorted(genres))
+
+    def _build_movie_search_index(self):
+        """Prepara un índice simple para acelerar la exploración."""
+        index = {}
+        for movie_id, movie_data in self.movies.items():
+            genre_ids = movie_data.get("generos", [])
+            if isinstance(genre_ids, list):
+                genre_names = frozenset(
+                    self.genre_mapping.get(gid, f"Género {gid}") for gid in genre_ids
+                )
+            else:
+                genre_names = frozenset()
+
+            index[movie_id] = {
+                "title": movie_data.get("titulo", "").lower(),
+                "genres": genre_names,
+            }
+
+        return index
+
     def get_genre_names(self, genre_ids):
         """Convertir IDs de géneros a nombres"""
         if isinstance(genre_ids, list):
@@ -518,23 +550,61 @@ class DataManager:
                 return None
 
             elif recommender_type == "hybrid":
-                # El recomendador híbrido devuelve lista de tuplas
+                # El recomendador híbrido devuelve scores normalizados y detalles
                 recommendations = self.recommender.recommend(
-                    user_id=user_id, top_k=top_k
+                    user_id=user_id,
+                    top_k=top_k,
+                    return_details=True,
                 )
                 if recommendations:
-                    # Convertir a formato DataFrame para compatibilidad
                     df_data = []
-                    for movie_id, score in recommendations:
-                        # Normalizar score de rating (0-5) a porcentaje (0-1)
-                        normalized_score = min(score / 5.0, 1.0) if score > 0 else 0.0
-                        df_data.append(
-                            {
-                                "movie_id": movie_id,
-                                "score": normalized_score,
-                                "reasons": [],
-                            }
-                        )
+                    for recommendation in recommendations:
+                        if isinstance(recommendation, dict):
+                            df_data.append(
+                                {
+                                    "movie_id": int(recommendation["movie_id"]),
+                                    "score": float(recommendation.get("score", 0.0)),
+                                    "alpha": float(recommendation.get("alpha", 0.0)),
+                                    "beta": float(recommendation.get("beta", 0.0)),
+                                    "content_score": float(
+                                        recommendation.get("content_score", 0.0)
+                                    ),
+                                    "collaborative_score": float(
+                                        recommendation.get("collaborative_score", 0.0)
+                                    ),
+                                    "content_contribution": float(
+                                        recommendation.get("content_contribution", 0.0)
+                                    ),
+                                    "collaborative_contribution": float(
+                                        recommendation.get(
+                                            "collaborative_contribution",
+                                            0.0,
+                                        )
+                                    ),
+                                    "appears_in_content": bool(
+                                        recommendation.get("appears_in_content", False)
+                                    ),
+                                    "appears_in_collaborative": bool(
+                                        recommendation.get(
+                                            "appears_in_collaborative",
+                                            False,
+                                        )
+                                    ),
+                                    "agreement_count": int(
+                                        recommendation.get("agreement_count", 0)
+                                    ),
+                                    "reasons": recommendation.get("reasons", []),
+                                }
+                            )
+                        else:
+                            movie_id, score = recommendation
+                            df_data.append(
+                                {
+                                    "movie_id": int(movie_id),
+                                    "score": float(score),
+                                    "reasons": [],
+                                }
+                            )
                     return pd.DataFrame(df_data)
                 return None
             else:

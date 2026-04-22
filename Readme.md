@@ -200,6 +200,7 @@ Combina la puntuacion del recomendador basado en contenido y la del colaborativo
 - Algoritmos: [docs/ALGORITHMS.md](docs/ALGORITHMS.md)
 - Basado en contenido en detalle: [docs/CONTENT_BASED_RECOMMENDER.md](docs/CONTENT_BASED_RECOMMENDER.md)
 - Colaborativo en detalle: [docs/COLLABORATIVE_RECOMMENDER.md](docs/COLLABORATIVE_RECOMMENDER.md)
+- Hibrido en detalle: [docs/HYBRID_RECOMMENDER.md](docs/HYBRID_RECOMMENDER.md)
 - Integracion previa: [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md)
 - Historial de cambios: [CHANGELOG.md](CHANGELOG.md)
 

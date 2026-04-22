@@ -123,6 +123,15 @@ class RecommendationsMixin:
                 movie_data["_positive_contributors"] = rec.get("positive_contributors")
                 movie_data["_neutral_contributors"] = rec.get("neutral_contributors")
                 movie_data["_negative_contributors"] = rec.get("negative_contributors")
+            elif recommender_type == "hybrid":
+                movie_data["_alpha"] = rec.get("alpha")
+                movie_data["_beta"] = rec.get("beta")
+                movie_data["_content_score"] = rec.get("content_score")
+                movie_data["_collaborative_score"] = rec.get("collaborative_score")
+                movie_data["_appears_in_content"] = rec.get("appears_in_content")
+                movie_data["_appears_in_collaborative"] = rec.get(
+                    "appears_in_collaborative"
+                )
             movies_to_show.append((movie_id, movie_data))
 
         if movies_to_show:
@@ -175,12 +184,26 @@ class RecommendationsMixin:
                         f"{int(num_contributors)} vecinos, "
                         f"similitud media {float(mean_similarity):.0%}"
                     )
+            elif recommender_type == "hybrid":
+                score = movie_data.get("_score")
+                if score is not None:
+                    st.metric("Compatibilidad", f"{float(score):.1%}")
+
+                alpha = movie_data.get("_alpha")
+                beta = movie_data.get("_beta")
+                if alpha is not None and beta is not None:
+                    st.caption(
+                        "Mezcla actual: "
+                        f"contenido {float(alpha):.0%}, "
+                        f"colaborativo {float(beta):.0%}"
+                    )
             elif movie_data.get("_score") is not None:
                 st.metric("Compatibilidad", f"{float(movie_data['_score']):.1%}")
 
             if "_reasons" in movie_data and movie_data["_reasons"]:
                 with st.expander("Por que se recomienda"):
-                    for reason in movie_data["_reasons"][:2]:
+                    reason_limit = 3 if recommender_type == "hybrid" else 2
+                    for reason in movie_data["_reasons"][:reason_limit]:
                         st.write(f"- {reason}")
 
             if st.button("Ver Detalles", key=f"rec_{movie_id}", width="stretch"):

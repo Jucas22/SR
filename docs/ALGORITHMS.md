@@ -154,11 +154,47 @@ Mezcla ambos mundos:
 - score del recomendador basado en contenido
 - score del recomendador colaborativo
 
-### Formula simplificada
+El proceso real sigue tres pasos:
+
+1. obtener una lista basada en contenido
+2. obtener una lista colaborativa
+3. unificar los items y recalcular su ratio con pesos dinamicos
+
+### Mezcla de ratios
 
 ```text
 score_hibrido = alpha * score_content + beta * score_collaborative
 ```
+
+con:
+
+```text
+alpha + beta = 1
+```
+
+En la implementacion actual:
+
+- `score_content` ya se usa en `[0, 1]`
+- `score_collaborative` se obtiene a partir del `ranking_score` colaborativo normalizado
+- `alpha` depende de la calidad y cantidad del perfil de contenido del usuario
+- `beta` depende de la calidad y cantidad de sus vecinos
+
+### Decisiones metodologicas clave
+
+- Pesos dinamicos:
+  no se usan coeficientes fijos; se recalculan en cada peticion
+- Normalizacion de escalas:
+  ambos modelos se llevan a una escala comparable antes de mezclar
+- Repetidos:
+  un item que aparece en ambas listas no se duplica; se combinan sus dos ratios
+- Suavizacion de pesos:
+  se comprimen diferencias moderadas para evitar que el hibrido se vuelva casi monolitico
+
+### Documentacion detallada
+
+Para la explicacion completa pensada para memoria o presentacion:
+
+- [docs/HYBRID_RECOMMENDER.md](</c:/Users/juanc/Documents/UPV/Master/SR/docs/HYBRID_RECOMMENDER.md>)
 
 ### Ventajas
 
@@ -167,8 +203,8 @@ score_hibrido = alpha * score_content + beta * score_collaborative
 
 ### Limitaciones
 
-- Ahora mismo la mezcla es sencilla y todavia admite mejora
-- Falta una calibracion mas fina de scores y pesos
+- Los pesos siguen siendo heuristicas, no aprendidos automaticamente
+- Todavia se puede calibrar mejor con evaluacion offline
 
 ## 4. Cold Start
 
