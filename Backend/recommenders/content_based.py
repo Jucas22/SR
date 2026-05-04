@@ -3,16 +3,17 @@ from __future__ import annotations
 """
 Sistema recomendador basado en contenido para películas.
 
-Mejoras incluidas respecto a la versión original:
-- Usa explícitamente el genre_vector del user_registry como base del perfil.
-- Reduce el vector de 20 géneros a un vector de 5-8 géneros relevantes.
-- Separa la similitud por géneros y por texto (overview, keywords, tags...).
-- Aplica una fórmula de recomendación interpretable:
-    score = w_genre * sim_genre
-          + w_text * sim_text
-          + w_quality * quality
-          + w_popularity * popularity
-- Tolera esquemas parcialmente distintos.
+Versión alineada con la práctica:
+- Selecciona un subconjunto de 5-8 preferencias de género relevantes.
+- Candidatos: ítems clasificados en al menos una preferencia relevante.
+- Excluye ítems ya vistos por el usuario.
+- Calcula un ratio interpretable por película:
+    r_ui = alpha * Score_contenido
+         + beta  * Score_calidad
+         + gamma * Score_popularidad
+         + delta * Score_similitud
+  con pesos por defecto: alpha=0.50, beta=0.20, gamma=0.15, delta=0.15.
+- Ordena de mayor a menor ratio y devuelve top-k.
 """
 
 from collections import Counter
@@ -63,6 +64,8 @@ class RecommendationResult:
     movie_id: int
     title: str
     score: float
+    content_score: float
+    semantic_score: float
     genre_score: float
     text_score: float
     quality_score: float
@@ -74,15 +77,15 @@ class ContentBasedRecommender:
     """
     Recomendador basado en contenido para películas.
 
-    Idea:
-    1) Construye features de ítems con:
-       - géneros (multi-label)
-       - texto libre (overview, keywords, tags...)
-    2) Construye el perfil del usuario a partir de:
-       - genre_vector del user_registry (20 géneros -> 5-8 géneros)
-       - ratings y/o histórico visto
-    3) Recomienda según:
-       score = w_genre*sim_genre + w_text*sim_text + w_quality*quality + w_popularity*popularity
+    Pipeline:
+    1) Obtiene preferencias de género del usuario y las reduce a 5-8.
+    2) Filtra candidatos por coincidencia de preferencias y excluye vistos.
+    3) Calcula cuatro componentes en [0,1]:
+       - contenido (afinidad por géneros normalizada por nº de géneros del ítem)
+       - calidad (vote_average/10 con fallback a ratings históricos)
+       - popularidad (normalización logarítmica de votos)
+       - similitud semántica (coseno perfil textual del usuario vs overview del ítem)
+    4) Combina componentes con alpha/beta/gamma/delta y ordena por ratio.
     """
 
     def __init__(
@@ -95,6 +98,10 @@ class ContentBasedRecommender:
         recency_weighting: bool = True,
         genre_profile_weight: float = 0.70,
         history_profile_weight: float = 0.30,
+        alpha: float = 0.50,
+        beta: float = 0.20,
+        gamma: float = 0.15,
+        delta: float = 0.15,
         w_genre: float = 0.60,
         w_text: float = 0.25,
         w_quality: float = 0.10,
@@ -129,11 +136,22 @@ class ContentBasedRecommender:
         self.genre_profile_weight = genre_profile_weight
         self.history_profile_weight = history_profile_weight
 
-        self.w_genre = w_genre
-        self.w_text = w_text
-        self.w_quality = w_quality
-        self.w_popularity = w_popularity
+        # Formula principal: contenido + calidad + popularidad + similitud semantica.
+        # Se mantienen los parametros antiguos (w_*) por compatibilidad hacia atras.
+        self.alpha = float(alpha if alpha is not None else w_genre)
+        self.beta = float(beta if beta is not None else w_quality)
+        self.gamma = float(gamma if gamma is not None else w_popularity)
+        self.delta = float(delta if delta is not None else w_text)
+        self._normalize_formula_weights()
 
+        # Alias legados para no romper integraciones existentes.
+        self.w_genre = self.alpha
+        self.w_quality = self.beta
+        self.w_popularity = self.gamma
+        self.w_text = self.delta
+
+        # Se conserva por compatibilidad, aunque en esta versión no se aplica
+        # re-ranking por diversidad para respetar el orden por ratio.
         self.diversity_penalty = diversity_penalty
 
         self.min_df = min_df
@@ -165,13 +183,29 @@ class ContentBasedRecommender:
         self.genre_columns_: List[str] = []
         self.genre_feature_idx_: List[int] = []
         self.text_feature_idx_: List[int] = []
+        self.overview_feature_idx_: List[int] = []
 
         self.quality_signal_: Optional[np.ndarray] = None
         self.popularity_signal_: Optional[np.ndarray] = None
+        self.overview_vectorizer_: Optional[TfidfVectorizer] = None
+        self.overview_matrix_: Optional[sparse.csr_matrix] = None
+
+        self._movie_genres_cache: List[List[str]] = []
+        self._user_overview_profile_cache: Dict[int, Optional[np.ndarray]] = {}
 
     # ------------------------------------------------------------------
     # API pública
     # ------------------------------------------------------------------
+    def _normalize_formula_weights(self) -> None:
+        weights = np.array([self.alpha, self.beta, self.gamma, self.delta], dtype=float)
+        weights = np.nan_to_num(weights, nan=0.0)
+        weights = np.clip(weights, 0.0, None)
+        total = float(weights.sum())
+        if total <= 1e-12:
+            weights = np.array([0.50, 0.20, 0.15, 0.15], dtype=float)
+            total = float(weights.sum())
+        self.alpha, self.beta, self.gamma, self.delta = (weights / total).tolist()
+
     def fit(
         self,
         movies: DataLike,
@@ -192,6 +226,7 @@ class ContentBasedRecommender:
 
         self._build_item_features()
         self._build_global_user_profiles()
+        self._user_overview_profile_cache = {}
         return self
 
     def recommend(
@@ -204,43 +239,33 @@ class ContentBasedRecommender:
     ) -> Union[pd.DataFrame, List[RecommendationResult]]:
         """Genera recomendaciones para un usuario."""
         self._check_is_fitted()
-
-        profile = self.build_user_profile(user_id)
-        if profile is None:
-            empty = pd.DataFrame(columns=[
-                "movie_id", "title", "score", "genre_score", "text_score",
-                "quality_score", "popularity_score", "reasons"
-            ])
-            return empty if return_df else []
-
-        genre_scores = np.zeros(len(self.movies), dtype=float)
-        text_scores = np.zeros(len(self.movies), dtype=float)
-
-        if self.genre_feature_idx_:
-            genre_profile = profile[self.genre_feature_idx_].reshape(1, -1)
-            genre_matrix = self.item_feature_matrix[:, self.genre_feature_idx_]
-            if np.linalg.norm(genre_profile) > 0:
-                genre_scores = cosine_similarity(genre_profile, genre_matrix).ravel()
-
-        if self.text_feature_idx_:
-            text_profile = profile[self.text_feature_idx_].reshape(1, -1)
-            text_matrix = self.item_feature_matrix[:, self.text_feature_idx_]
-            if np.linalg.norm(text_profile) > 0:
-                text_scores = cosine_similarity(text_profile, text_matrix).ravel()
-
+        reduced_genres = self.get_reduced_user_genre_preferences(user_id)
+        content_scores = self._compute_content_scores(user_id)
+        semantic_scores = self._compute_semantic_scores(user_id)
         quality_scores = self.quality_signal_ if self.quality_signal_ is not None else np.zeros(len(self.movies))
         popularity_scores = self.popularity_signal_ if self.popularity_signal_ is not None else np.zeros(len(self.movies))
 
-        scores = (
-            self.w_genre * genre_scores
-            + self.w_text * text_scores
-            + self.w_quality * quality_scores
-            + self.w_popularity * popularity_scores
+        raw_scores = (
+            self.alpha * content_scores
+            + self.beta * quality_scores
+            + self.gamma * popularity_scores
+            + self.delta * semantic_scores
         )
+        scores = self._minmax(raw_scores)
 
         seen = self.get_seen_movies(user_id)
         candidate_mask = np.ones(len(self.movies), dtype=bool)
 
+        # Paso 1 (documento): solo items clasificados en preferencias relevantes.
+        if reduced_genres:
+            preferred_genres = set(reduced_genres.keys())
+            matches_preference = np.array([
+                any(g in preferred_genres for g in genres if g)
+                for genres in self._movie_genres_cache
+            ], dtype=bool)
+            candidate_mask &= matches_preference
+
+        # Paso 2 (documento): eliminar items ya vistos por el usuario.
         if exclude_seen and seen:
             seen_idx = [self.movie_id_to_idx[mid] for mid in seen if mid in self.movie_id_to_idx]
             if seen_idx:
@@ -253,41 +278,16 @@ class ContentBasedRecommender:
         valid_indices = np.where(candidate_mask)[0]
         if len(valid_indices) == 0:
             empty = pd.DataFrame(columns=[
-                "movie_id", "title", "score", "genre_score", "text_score",
-                "quality_score", "popularity_score", "reasons"
+                "movie_id", "title", "score", "content_score", "semantic_score",
+                "genre_score", "text_score", "quality_score", "popularity_score", "reasons"
             ])
             return empty if return_df else []
 
+        # Paso 4 (documento): ordenar por ratio de mayor a menor.
         ranked = sorted(valid_indices, key=lambda idx: scores[idx], reverse=True)
-        selected: List[int] = []
-
-        for idx in ranked:
-            if len(selected) >= top_k:
-                break
-
-            if not selected:
-                selected.append(idx)
-                continue
-
-            too_similar = False
-            for prev_idx in selected:
-                sim = cosine_similarity(
-                    self.item_feature_matrix[idx],
-                    self.item_feature_matrix[prev_idx],
-                )[0, 0]
-                if sim >= (1.0 - self.diversity_penalty):
-                    too_similar = True
-                    break
-
-            if not too_similar:
-                selected.append(idx)
-
-        if len(selected) < top_k:
-            for idx in ranked:
-                if idx not in selected:
-                    selected.append(idx)
-                if len(selected) >= top_k:
-                    break
+        selected = ranked[:top_k]
+        user_topics = self._get_user_topic_preferences(user_id)
+        reference_movies = self._get_user_reference_movies(user_id)
 
         rows: List[RecommendationResult] = []
         for idx in selected[:top_k]:
@@ -299,11 +299,20 @@ class ContentBasedRecommender:
                     movie_id=movie_id,
                     title=self._resolve_movie_title(movie_row),
                     score=float(scores[idx]),
-                    genre_score=float(genre_scores[idx]),
-                    text_score=float(text_scores[idx]),
+                    content_score=float(content_scores[idx]),
+                    semantic_score=float(semantic_scores[idx]),
+                    genre_score=float(content_scores[idx]),
+                    text_score=float(semantic_scores[idx]),
                     quality_score=float(quality_scores[idx]),
                     popularity_score=float(popularity_scores[idx]),
-                    reasons=self.explain_recommendation(user_id, movie_id),
+                    reasons=self.explain_recommendation(
+                        user_id,
+                        movie_id,
+                        semantic_score=float(semantic_scores[idx]),
+                        reduced_genres=reduced_genres,
+                        user_topics=user_topics,
+                        reference_movies=reference_movies,
+                    ),
                 )
             )
 
@@ -377,6 +386,7 @@ class ContentBasedRecommender:
             self.ratings = pd.concat([self.ratings, new_row], ignore_index=True)
 
         if refit_cache:
+            self._user_overview_profile_cache.pop(int(user_id), None)
             profile = self._build_single_user_profile_from_ratings(user_id)
             registry_genre_profile = self._build_user_genre_profile(user_id)
 
@@ -394,7 +404,16 @@ class ContentBasedRecommender:
             if profile is not None:
                 self.global_user_profiles[user_id] = profile
 
-    def explain_recommendation(self, user_id: int, movie_id: int, top_n_reasons: int = 5) -> List[str]:
+    def explain_recommendation(
+        self,
+        user_id: int,
+        movie_id: int,
+        top_n_reasons: int = 5,
+        semantic_score: Optional[float] = None,
+        reduced_genres: Optional[Dict[str, float]] = None,
+        user_topics: Optional[Sequence[str]] = None,
+        reference_movies: Optional[Sequence[int]] = None,
+    ) -> List[str]:
         """Explicación legible basada en géneros, temas y películas del historial."""
         self._check_is_fitted()
 
@@ -405,7 +424,10 @@ class ContentBasedRecommender:
         target_idx = self.movie_id_to_idx[movie_id]
         target_row = self.movies.iloc[target_idx]
 
-        reduced_genres = self.get_reduced_user_genre_preferences(user_id)
+        # Evita explicaciones demasiado matematicas: prioriza motivos legibles.
+
+        if reduced_genres is None:
+            reduced_genres = self.get_reduced_user_genre_preferences(user_id)
         target_genres = [
             genre
             for genre in (
@@ -417,7 +439,8 @@ class ContentBasedRecommender:
         target_topics = self._extract_reason_topics(target_row)
 
         common_genres = [genre for genre in reduced_genres.keys() if genre in target_genres]
-        user_topics = self._get_user_topic_preferences(user_id)
+        if user_topics is None:
+            user_topics = self._get_user_topic_preferences(user_id)
         user_topics_set = set(user_topics)
         common_topics = [topic for topic in target_topics if topic in user_topics_set]
 
@@ -445,17 +468,24 @@ class ContentBasedRecommender:
 
         best_sim = -1.0
         similar_seen_row = None
-        for seen_id in self._get_user_reference_movies(user_id):
-            if seen_id not in self.movie_id_to_idx or int(seen_id) == int(movie_id):
-                continue
-            seen_idx = self.movie_id_to_idx[seen_id]
-            sim = cosine_similarity(
-                self.item_feature_matrix[target_idx],
-                self.item_feature_matrix[seen_idx],
-            )[0, 0]
-            if sim > best_sim:
-                best_sim = sim
-                similar_seen_row = self.movies.iloc[seen_idx]
+        if reference_movies is None:
+            reference_movies = self._get_user_reference_movies(user_id)
+
+        # Vectorizado: calcula similitud del item objetivo contra todas las
+        # peliculas de referencia en una sola llamada.
+        seen_indices = [
+            self.movie_id_to_idx[seen_id]
+            for seen_id in reference_movies
+            if seen_id in self.movie_id_to_idx and int(seen_id) != int(movie_id)
+        ]
+        if seen_indices:
+            target_vector = self.item_feature_matrix[target_idx]
+            seen_matrix = self.item_feature_matrix[seen_indices]
+            sims = cosine_similarity(target_vector, seen_matrix).ravel()
+            if sims.size > 0:
+                best_pos = int(np.argmax(sims))
+                best_sim = float(sims[best_pos])
+                similar_seen_row = self.movies.iloc[seen_indices[best_pos]]
 
         if similar_seen_row is not None and best_sim > 0.05:
             seen_title = self._resolve_movie_title(similar_seen_row)
@@ -498,9 +528,17 @@ class ContentBasedRecommender:
         if quality_reason:
             reasons.append(quality_reason)
 
+        if semantic_score is None:
+            semantic_scores = self._compute_semantic_scores(user_id)
+            semantic_score = float(semantic_scores[target_idx]) if target_idx < len(semantic_scores) else 0.0
+        if float(semantic_score) >= 0.55:
+            reasons.append(
+                "Tambien encaja por el tipo de historia y tono del overview, muy cercano a lo que sueles ver."
+            )
+
         if not reasons:
             reasons.append(
-                "Su combinación de género y contenido es cercana a las películas de tu historial."
+                "Encaja con tu perfil por su mezcla de genero y estilo narrativo."
             )
 
         unique_reasons: List[str] = []
@@ -721,6 +759,35 @@ class ContentBasedRecommender:
 
         self.quality_signal_ = self._build_quality_signal()
         self.popularity_signal_ = self._build_popularity_signal()
+        self._movie_genres_cache = [
+            [self._canonicalize_genre_token(g) for g in self._safe_split_multi_value(row.get("generos", []))]
+            for _, row in self.movies.iterrows()
+        ]
+        self._build_overview_features()
+
+    def _build_overview_features(self) -> None:
+        assert self.movies is not None
+        overview_corpus = []
+        for _, row in self.movies.iterrows():
+            value = row.get("overview", "")
+            text = "" if value is None else str(value)
+            text = re.sub(r"[^\w\s]", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
+            overview_corpus.append(text)
+
+        if not any(text for text in overview_corpus):
+            self.overview_vectorizer_ = None
+            self.overview_matrix_ = None
+            return
+
+        self.overview_vectorizer_ = TfidfVectorizer(
+            min_df=self.min_df,
+            max_features=max(1000, min(self.max_tfidf_features, 20000)),
+            stop_words=self.stop_words,
+            lowercase=self.lowercase,
+            ngram_range=(1, 2),
+        )
+        self.overview_matrix_ = self.overview_vectorizer_.fit_transform(overview_corpus).tocsr()
 
     def _build_text_document(self, row: pd.Series) -> str:
         parts: List[str] = []
@@ -748,48 +815,48 @@ class ContentBasedRecommender:
     def _build_quality_signal(self) -> Optional[np.ndarray]:
         try:
             assert self.movies is not None
+            for col in ("vote_average", "vote_average_tmdb", "tmdb_score", "imdb_rating"):
+                if col not in self.movies.columns:
+                    continue
+                values = pd.to_numeric(self.movies[col], errors="coerce")
+                if values.notna().any():
+                    normalized = (values / 10.0).clip(0.0, 1.0)
+                    mean_value = float(normalized.mean()) if normalized.notna().any() else 0.5
+                    return normalized.fillna(mean_value).to_numpy(dtype=float)
 
-            candidate_cols = [
-                "vote_average",
-                "vote_average_tmdb",
-                "imdb_rating",
-                "tmdb_score",
-                "puntuacion_media",
-                "mean_rating",
-                "avg_rating",
-            ]
-            available = [c for c in candidate_cols if c in self.movies.columns]
+            if self.ratings is not None and not self.ratings.empty:
+                agg = self.ratings.groupby(self.movie_id_col)["rating"].mean().rename("mean_rating")
+                tmp = self.movies[[self.movie_id_col]].merge(agg, on=self.movie_id_col, how="left")
+                values = pd.to_numeric(tmp["mean_rating"], errors="coerce")
+                normalized = (values / 5.0).clip(0.0, 1.0)
+                mean_value = float(normalized.mean()) if normalized.notna().any() else 0.5
+                return normalized.fillna(mean_value).to_numpy(dtype=float)
 
-            if not available:
-                if self.ratings is not None and not self.ratings.empty:
-                    agg = self.ratings.groupby(self.movie_id_col)["rating"].mean().rename("mean_rating")
-                    tmp = self.movies[[self.movie_id_col]].merge(agg, on=self.movie_id_col, how="left")
-                    values = tmp["mean_rating"].fillna(tmp["mean_rating"].mean()).fillna(0.5)
-                    return self._minmax(values.to_numpy(dtype=float))
-                return None
-
-            values = self.movies[available].apply(pd.to_numeric, errors="coerce")
-            values = values.fillna(values.mean()).fillna(0.5)
-            mean_score = values.mean(axis=1)
-            return self._minmax(mean_score.to_numpy(dtype=float))
+            return np.full(len(self.movies), 0.5, dtype=float)
         except Exception:
             return None
 
     def _build_popularity_signal(self) -> Optional[np.ndarray]:
         try:
             assert self.movies is not None
+            if "vote_count" in self.movies.columns:
+                counts = pd.to_numeric(self.movies["vote_count"], errors="coerce").fillna(0.0)
+            elif self.ratings is not None and not self.ratings.empty:
+                n_ratings = self.ratings.groupby(self.movie_id_col).size().rename("n_ratings")
+                tmp = self.movies[[self.movie_id_col]].merge(n_ratings, on=self.movie_id_col, how="left")
+                counts = pd.to_numeric(tmp["n_ratings"], errors="coerce").fillna(0.0)
+            else:
+                return np.zeros(len(self.movies), dtype=float)
 
-            if "popularity" in self.movies.columns:
-                values = pd.to_numeric(self.movies["popularity"], errors="coerce").fillna(0)
-                return self._minmax(values.to_numpy(dtype=float))
+            max_votes = float(np.nanmax(counts.to_numpy(dtype=float))) if len(counts) else 0.0
+            if max_votes <= 0:
+                return np.zeros(len(self.movies), dtype=float)
 
-            if self.ratings is not None and not self.ratings.empty:
-                counts = self.ratings.groupby(self.movie_id_col).size().rename("n_ratings")
-                tmp = self.movies[[self.movie_id_col]].merge(counts, on=self.movie_id_col, how="left")
-                values = tmp["n_ratings"].fillna(0).to_numpy(dtype=float)
-                return self._minmax(values)
-
-            return None
+            numerator = np.log1p(counts.to_numpy(dtype=float))
+            denominator = math.log1p(max_votes)
+            if denominator <= 0:
+                return np.zeros(len(self.movies), dtype=float)
+            return np.clip(numerator / denominator, 0.0, 1.0)
         except Exception:
             return None
 
@@ -867,6 +934,72 @@ class ContentBasedRecommender:
                 return self._weighted_average_vectors(item_vectors, weights)
 
         return None
+
+    def _compute_content_scores(self, user_id: int) -> np.ndarray:
+        assert self.movies is not None
+        reduced = self.get_reduced_user_genre_preferences(user_id)
+        if not reduced:
+            return np.zeros(len(self.movies), dtype=float)
+
+        scores = np.zeros(len(self.movies), dtype=float)
+        for idx, genres in enumerate(self._movie_genres_cache):
+            genres = [g for g in genres if g]
+            if not genres:
+                continue
+            affinity = sum(float(reduced.get(g, 0.0)) for g in genres)
+            scores[idx] = float(affinity) / float(len(genres))
+        return np.clip(scores, 0.0, 1.0)
+
+    def _compute_semantic_scores(self, user_id: int) -> np.ndarray:
+        assert self.movies is not None
+        if self.overview_matrix_ is None:
+            return np.zeros(len(self.movies), dtype=float)
+
+        profile = self._build_user_overview_profile(user_id)
+        if profile is None or np.linalg.norm(profile) <= 1e-12:
+            return np.zeros(len(self.movies), dtype=float)
+
+        profile_2d = profile.reshape(1, -1)
+        scores = cosine_similarity(profile_2d, self.overview_matrix_).ravel()
+        return np.clip(scores, 0.0, 1.0)
+
+    def _build_user_overview_profile(self, user_id: int) -> Optional[np.ndarray]:
+        if user_id in self._user_overview_profile_cache:
+            return self._user_overview_profile_cache[user_id]
+        if self.overview_matrix_ is None:
+            self._user_overview_profile_cache[user_id] = None
+            return None
+
+        vectors = []
+        weights = []
+
+        if self.ratings is not None and not self.ratings.empty:
+            user_ratings = self.ratings[self.ratings[self.user_id_col] == user_id].copy()
+            user_ratings = user_ratings[user_ratings[self.movie_id_col].isin(self.movie_id_to_idx)]
+            for _, row in user_ratings.iterrows():
+                rating = float(row["rating"])
+                if rating < self.rating_threshold_like:
+                    continue
+                movie_id = int(row[self.movie_id_col])
+                idx = self.movie_id_to_idx[movie_id]
+                vectors.append(self.overview_matrix_[idx])
+                weights.append(max(0.1, rating - self.rating_threshold_like + 0.1))
+
+        if not vectors:
+            for movie_id in self.get_seen_movies(user_id):
+                if movie_id not in self.movie_id_to_idx:
+                    continue
+                idx = self.movie_id_to_idx[movie_id]
+                vectors.append(self.overview_matrix_[idx])
+                weights.append(1.0)
+
+        if not vectors:
+            self._user_overview_profile_cache[user_id] = None
+            return None
+
+        profile = self._weighted_average_vectors(vectors, weights)
+        self._user_overview_profile_cache[user_id] = profile
+        return profile
 
     def _build_single_user_profile_from_ratings(self, user_id: int) -> Optional[np.ndarray]:
         if self.ratings is None or self.ratings.empty:
@@ -1256,14 +1389,14 @@ class ContentBasedRecommender:
 if __name__ == "__main__":
     recommender = ContentBasedRecommender(
         categorical_columns=["generos"],
-        feature_text_columns=["overview", "keywords", "tags"],
+        feature_text_columns=["overview"],
         profile_strategy="weighted",
         min_reduced_genres=5,
         max_reduced_genres=8,
-        w_genre=0.60,
-        w_text=0.25,
-        w_quality=0.10,
-        w_popularity=0.05,
+        alpha=0.50,
+        beta=0.20,
+        gamma=0.15,
+        delta=0.15,
     )
 
     # Ejemplo:

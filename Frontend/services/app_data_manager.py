@@ -276,7 +276,7 @@ class DataManager(LegacyDataManager):
         self.ensure_recommender_initialized("collaborative")
 
     def get_recommendations(
-        self, user_id, top_k=10, exclude_seen=True, recommender_type="content"
+        self, user_id, top_k=20, exclude_seen=True, recommender_type="content"
     ):
         """
         Override del flujo legado para enriquecer las recomendaciones colaborativas

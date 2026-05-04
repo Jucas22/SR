@@ -121,8 +121,8 @@ class AppManager:
             num_recommendations = st.slider(
                 "¿Cuántas recomendaciones quieres?",
                 min_value=5,
-                max_value=20,
-                value=10,
+                max_value=200,
+                value=20,
                 step=5,
             )
 
@@ -161,8 +161,16 @@ class AppManager:
                 movie_id = int(rec["movie_id"])
                 if str(movie_id) in self.data_manager.movies:
                     movie_data = self.data_manager.movies[str(movie_id)]
+                    movie_data["_recommender_type"] = recommender_type
                     movie_data["_score"] = rec["score"]
                     movie_data["_reasons"] = rec["reasons"]
+                    if recommender_type == "hybrid":
+                        movie_data["_alpha"] = rec.get("alpha")
+                        movie_data["_beta"] = rec.get("beta")
+                        movie_data["_content_score"] = rec.get("content_score")
+                        movie_data["_collaborative_score"] = rec.get("collaborative_score")
+                        movie_data["_content_contribution"] = rec.get("content_contribution")
+                        movie_data["_collaborative_contribution"] = rec.get("collaborative_contribution")
                     movies_to_show.append((movie_id, movie_data))
             
             if movies_to_show:
@@ -204,7 +212,33 @@ class AppManager:
             # Score
             if "_score" in movie_data:
                 score = movie_data["_score"]
-                st.metric("Compatibilidad", f"{score:.1%}")
+                st.metric("Compatibilidad", f"{float(score):.1%}")
+            if movie_data.get("_recommender_type") == "hybrid":
+                content_score = movie_data.get("_content_score")
+                collaborative_score = movie_data.get("_collaborative_score")
+                if content_score is not None and collaborative_score is not None:
+                    st.caption(
+                        "Score por sistema para esta pelicula: "
+                        f"contenido {float(content_score):.0%}, "
+                        f"colaborativo {float(collaborative_score):.0%}"
+                    )
+                content_contribution = movie_data.get("_content_contribution")
+                collaborative_contribution = movie_data.get("_collaborative_contribution")
+                if content_contribution is not None and collaborative_contribution is not None:
+                    content_contribution = float(content_contribution)
+                    collaborative_contribution = float(collaborative_contribution)
+                    total_contribution = content_contribution + collaborative_contribution
+                    if total_contribution > 1e-12:
+                        content_real_pct = content_contribution / total_contribution
+                        collaborative_real_pct = collaborative_contribution / total_contribution
+                    else:
+                        content_real_pct = 0.5
+                        collaborative_real_pct = 0.5
+                    st.caption(
+                        "Aporte real en esta recomendacion: "
+                        f"contenido {content_real_pct:.0%}, "
+                        f"colaborativo {collaborative_real_pct:.0%}"
+                    )
 
             # Razones
             if "_reasons" in movie_data and movie_data["_reasons"]:
@@ -270,7 +304,7 @@ class AppManager:
                     for contributor in contributors[:5]:
                         st.write(
                             f"• Usuario {contributor['neighbor_id']} | "
-                            f"Similitud: {contributor['similarity']:.3f} | "
+                            f"Similitud: {'Alta' if float(contributor['similarity']) >= 0.70 else ('Media' if float(contributor['similarity']) >= 0.45 else 'Baja')} | "
                             f"Rating: {contributor['rating']:.1f}"
                         )
                 else:

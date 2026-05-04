@@ -37,7 +37,7 @@ class HybridRecommender:
        para cada usuario y cada petición.
     """
 
-    DEFAULT_CANDIDATE_POOL = 50
+    DEFAULT_CANDIDATE_POOL = 100
     MAX_NEIGHBORS_REFERENCE = 40
     CONTENT_RATING_TARGET = 15
     CONTENT_WATCH_TARGET = 20
@@ -340,20 +340,12 @@ class HybridRecommender:
         collaborative_signal = max(0.0, float(collaborative_signal))
         if content_signal <= 1e-12 and collaborative_signal <= 1e-12:
             return 0.0, 0.0
-
-        # Suaviza diferencias moderadas entre señales para que el modelo híbrido
-        # no se convierta en un recomendador casi monolítico cuando ambos
-        # enfoques aportan información útil.
-        adjusted_content = float(np.sqrt(content_signal)) if content_signal > 0 else 0.0
-        adjusted_collaborative = (
-            float(np.sqrt(collaborative_signal))
-            if collaborative_signal > 0
-            else 0.0
-        )
-        total = adjusted_content + adjusted_collaborative
-        if total <= 1e-12:
-            return 0.0, 0.0
-        return adjusted_content / total, adjusted_collaborative / total
+        # Trato equilibrado entre ambos modelos cuando los dos aportan señal.
+        if content_signal > 1e-12 and collaborative_signal > 1e-12:
+            return 0.5, 0.5
+        if content_signal > 1e-12:
+            return 1.0, 0.0
+        return 0.0, 1.0
 
     def _normalize_content_ratio(self, content_row: Optional[Dict[str, Any]]) -> float:
         if not content_row:
@@ -450,61 +442,50 @@ class HybridRecommender:
 
         if in_content and in_collaborative:
             reasons.append(
-                "Esta pelicula aparece en ambos recomendadores, por lo que hay consenso entre el modelo basado en contenido y el colaborativo."
+                "Esta pelicula aparece en ambos recomendadores, asi que hay consenso entre contenido y colaborativo."
+            )
+            reasons.append(
+                "Se recomienda por una mezcla equilibrada entre afinidad de contenido y evidencia de vecinos."
             )
         elif in_content:
             reasons.append(
-                "Esta pelicula entra en la mezcla sobre todo por la señal del recomendador basado en contenido."
+                "Esta pelicula encaja por su similitud de genero, tematica e historia con lo que sueles ver."
             )
+            reasons.append("La recomendacion se apoya principalmente en tu perfil de contenido.")
         elif in_collaborative:
             reasons.append(
-                "Esta pelicula entra en la mezcla sobre todo por la señal del recomendador colaborativo."
+                "Esta pelicula destaca porque usuarios vecinos con gustos parecidos la valoraron bien."
             )
-
-        reasons.append(
-            "En esta peticion, el peso del contenido es "
-            f"{alpha:.0%} y el del colaborativo es {beta:.0%}."
-        )
-
-        if in_content or in_collaborative:
-            content_ratio = self._normalize_content_ratio(content_row)
-            collaborative_ratio = self._normalize_collaborative_ratio(collaborative_row)
-            reasons.append(
-                "Su ratio final combina "
-                f"{content_ratio:.0%} de afinidad por contenido y "
-                f"{collaborative_ratio:.0%} de señal colaborativa."
-            )
+            reasons.append("La recomendacion se apoya principalmente en usuarios vecinos.")
 
         if content_row:
             content_reasons = content_row.get("reasons", [])
             if isinstance(content_reasons, list):
                 for reason in content_reasons[:1]:
                     if reason:
-                        reasons.append(f"Parte basada en contenido: {reason}")
+                        reasons.append(reason)
 
         if collaborative_row:
-            confidence = float(collaborative_row.get("confidence", 0.0))
             num_contributors = int(collaborative_row.get("num_contributors", 0))
             if num_contributors > 0:
                 reasons.append(
-                    "Parte colaborativa: "
-                    f"{num_contributors} vecinos contribuyen a la recomendacion con "
-                    f"una confianza de {confidence:.0%}."
+                    f"{num_contributors} vecinos contribuyen a esta recomendacion."
                 )
 
         genre_count = int(content_diagnostics.get("genre_count", 0))
         ratings_count = int(content_diagnostics.get("ratings_count", 0))
         neighbor_count = int(collaborative_diagnostics.get("neighbor_count", 0))
         mean_similarity = float(collaborative_diagnostics.get("mean_similarity", 0.0))
+        similarity_label = "alta" if mean_similarity >= 0.70 else ("media" if mean_similarity >= 0.45 else "baja")
         reasons.append(
-            "Estos pesos se han calculado a partir de la informacion disponible del usuario: "
+            "Se ha tenido en cuenta la informacion disponible del usuario: "
             f"{genre_count} generos relevantes, {ratings_count} ratings historicos, "
-            f"{neighbor_count} vecinos y una similitud media de {mean_similarity:.0%}."
+            f"{neighbor_count} vecinos y una similitud media {similarity_label}."
         )
 
         if not reasons:
             reasons.append(
-                "La recomendacion hibrida combina la cercania por contenido y la evidencia de usuarios similares."
+                "La recomendacion hibrida combina cercania por contenido y evidencia de usuarios similares."
             )
 
         unique_reasons: List[str] = []

@@ -1,5 +1,7 @@
 Data/posters
 .vscode/
 SR/
+env_recom/
+.venv/
 __pycache__/
 .streamlit

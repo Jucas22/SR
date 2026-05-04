@@ -497,7 +497,7 @@ class DataManager:
         return len(self.movies)
 
     def get_recommendations(
-        self, user_id, top_k=10, exclude_seen=True, recommender_type="content"
+        self, user_id, top_k=20, exclude_seen=True, recommender_type="content"
     ):
         """
         Obtener recomendaciones personalizadas para un usuario

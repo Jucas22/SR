@@ -65,8 +65,8 @@ class RecommendationsMixin:
             num_recommendations = st.slider(
                 "Cuantas recomendaciones quieres?",
                 min_value=5,
-                max_value=20,
-                value=10,
+                max_value=200,
+                value=20,
                 step=5,
             )
 
@@ -128,6 +128,8 @@ class RecommendationsMixin:
                 movie_data["_beta"] = rec.get("beta")
                 movie_data["_content_score"] = rec.get("content_score")
                 movie_data["_collaborative_score"] = rec.get("collaborative_score")
+                movie_data["_content_contribution"] = rec.get("content_contribution")
+                movie_data["_collaborative_contribution"] = rec.get("collaborative_contribution")
                 movie_data["_appears_in_content"] = rec.get("appears_in_content")
                 movie_data["_appears_in_collaborative"] = rec.get(
                     "appears_in_collaborative"
@@ -182,7 +184,7 @@ class RecommendationsMixin:
                     st.caption(
                         "Soporte: "
                         f"{int(num_contributors)} vecinos, "
-                        f"similitud media {float(mean_similarity):.0%}"
+                        f"similitud media {self._format_similarity_label(float(mean_similarity))}"
                     )
             elif recommender_type == "hybrid":
                 score = movie_data.get("_score")
@@ -191,9 +193,34 @@ class RecommendationsMixin:
 
                 alpha = movie_data.get("_alpha")
                 beta = movie_data.get("_beta")
-                if alpha is not None and beta is not None:
+                content_score = movie_data.get("_content_score")
+                collaborative_score = movie_data.get("_collaborative_score")
+                if content_score is not None and collaborative_score is not None:
                     st.caption(
-                        "Mezcla actual: "
+                        "Score por sistema para esta pelicula: "
+                        f"contenido {float(content_score):.0%}, "
+                        f"colaborativo {float(collaborative_score):.0%}"
+                    )
+                content_contribution = movie_data.get("_content_contribution")
+                collaborative_contribution = movie_data.get("_collaborative_contribution")
+                if content_contribution is not None and collaborative_contribution is not None:
+                    content_contribution = float(content_contribution)
+                    collaborative_contribution = float(collaborative_contribution)
+                    total_contribution = content_contribution + collaborative_contribution
+                    if total_contribution > 1e-12:
+                        content_real_pct = content_contribution / total_contribution
+                        collaborative_real_pct = collaborative_contribution / total_contribution
+                    else:
+                        content_real_pct = 0.5
+                        collaborative_real_pct = 0.5
+                    st.caption(
+                        "Aporte real en esta recomendacion: "
+                        f"contenido {content_real_pct:.0%}, "
+                        f"colaborativo {collaborative_real_pct:.0%}"
+                    )
+                elif alpha is not None and beta is not None:
+                    st.caption(
+                        "Aporte estimado: "
                         f"contenido {float(alpha):.0%}, "
                         f"colaborativo {float(beta):.0%}"
                     )
@@ -285,14 +312,13 @@ class RecommendationsMixin:
                         confidence_value = float(confidence)
                         st.write(
                             "- Confianza de la recomendacion: "
-                            f"{self._format_confidence_label(confidence_value)} "
-                            f"({confidence_value:.0%})"
+                            f"{confidence_value:.0%}"
                         )
                     if num_contributors is not None and mean_similarity is not None:
                         st.write(
                             "- Evidencia colaborativa: "
                             f"{int(num_contributors)} usuarios parecidos han visto esta pelicula, "
-                            f"con una similitud media del {float(mean_similarity):.0%}."
+                            f"con una similitud media {self._format_similarity_label(float(mean_similarity))}."
                         )
                         if breakdown_consistent:
                             st.write(
@@ -314,7 +340,7 @@ class RecommendationsMixin:
                         )
                         st.write(
                             f"- Usuario {contributor['neighbor_id']} | "
-                            f"Similitud: {contributor['similarity']:.0%} | "
+                            f"Similitud: {self._format_similarity_label(float(contributor['similarity']))} | "
                             f"Rating: {contributor['rating']:.1f} | "
                             f"{sentiment_label}"
                         )
@@ -336,6 +362,14 @@ class RecommendationsMixin:
         if confidence >= 0.70:
             return "Alta"
         if confidence >= 0.45:
+            return "Media"
+        return "Baja"
+
+    def _format_similarity_label(self, similarity: float) -> str:
+        """Convierte similitud numerica en texto natural."""
+        if similarity >= 0.70:
+            return "Alta"
+        if similarity >= 0.45:
             return "Media"
         return "Baja"
 
