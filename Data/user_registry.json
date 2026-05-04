@@ -4,7 +4,7 @@
     "total_users": 672,
     "active_users": 672,
     "created_date": "2026-03-11",
-    "last_updated": "2026-04-22"
+    "last_updated": "2026-05-05"
   },
   "users": {
     "1": {
@@ -12,8 +12,8 @@
       "name": null,
       "status": "active",
       "created_date": "2024-01-01",
-      "last_activity": "2024-12-31",
-      "total_ratings": 3,
+      "last_activity": "2026-05-05",
+      "total_ratings": 6,
       "user_type": "existing",
       "preferences": {
         "favorite_genres": [
@@ -24,34 +24,24 @@
         "watched_movies": [
           2193,
           2105,
-          1405
+          1405,
+          35656,
+          35669,
+          35688
         ],
         "genre_vector": {
-          "Aventura": 0.0,
-          "Fantas¡a": 0.0,
-          "Animaci¢n": 0.0,
           "Drama": 27.03,
-          "Terror": 0.0,
-          "Acción": 0.0,
           "Comedia": 100.0,
-          "Historica": 0.0,
-          "Oeste": 0.0,
-          "Suspense": 0.0,
-          "Crimen": 0.0,
-          "Documental": 0.0,
-          "Ciencia ficción": 0.0,
-          "Misterio": 0.0,
-          "Musical": 0.0,
           "Romance": 100.0,
-          "Familiar": 0.0,
-          "Guerra": 0.0,
-          "Extranjera": 0.0,
-          "TV": 0.0
+          "Acción": 50.0,
+          "Aventura": 50.0,
+          "Suspense": 50.0,
+          "Terror": 50.0
         }
       },
       "statistics": {
-        "avg_rating": 2.33,
-        "rating_count": 3,
+        "avg_rating": 3.67,
+        "rating_count": 6,
         "active_since": "2024-01-01",
         "mean_rating": 2.33
       }

@@ -1,12 +1,13 @@
 import streamlit as st
 
 from Frontend.ui.catalog_mixin import CatalogMixin
+from Frontend.ui.group_mixin import GroupMixin
 from Frontend.ui.recommendations_mixin import RecommendationsMixin
 from Frontend.ui.styles import APP_STYLES
 from Frontend.ui.user_mixin import UserMixin
 
 
-class AppManager(UserMixin, RecommendationsMixin, CatalogMixin):
+class AppManager(UserMixin, RecommendationsMixin, CatalogMixin, GroupMixin):
     """Coordinador principal de la UI tras el login."""
 
     GRID_COLS_DESKTOP = 4
@@ -32,6 +33,8 @@ class AppManager(UserMixin, RecommendationsMixin, CatalogMixin):
             self._render_movies_browser()
         elif section == "Mis Ratings":
             self._render_user_ratings()
+        elif section == "Grupo":
+            self._render_group_recommendations()
         else:
             self._render_user_statistics()
 
@@ -45,7 +48,7 @@ class AppManager(UserMixin, RecommendationsMixin, CatalogMixin):
 
         return st.radio(
             "Seccion principal",
-            options=["Recomendadas", "Explorar", "Mis Ratings", "Estadisticas"],
+            options=["Recomendadas", "Explorar", "Mis Ratings", "Grupo", "Estadisticas"],
             horizontal=True,
             key="main_section",
             label_visibility="collapsed",

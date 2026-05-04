@@ -9,6 +9,7 @@ from Backend.recommenders import (
     ContentBasedRecommender,
     HybridRecommender,
 )
+from Backend.group_recommender import GroupRecommender
 from Backend.services import UserRegistryManager
 from Frontend.services.data_manager import DataManager as LegacyDataManager
 from project_paths import CLEAN_DATA_DIR, POSTERS_DIR, RAW_DATA_DIR, USER_REGISTRY_PATH
@@ -31,6 +32,7 @@ class DataManager(LegacyDataManager):
         self.content_recommender = None
         self.collaborative_recommender = None
         self.hybrid_recommender = None
+        self.group_recommender = None
         self.recommender = None
         self.current_recommender_type = "content"
         self.user_registry_manager = UserRegistryManager()
@@ -211,6 +213,24 @@ class DataManager(LegacyDataManager):
             traceback.print_exc()
             return None
 
+    def _initialize_group_recommender(self):
+        """Inicializar el recomendador de grupo usando el colaborativo como base."""
+        try:
+            if self.collaborative_recommender is None:
+                self.collaborative_recommender = self._initialize_collaborative_recommender()
+
+            if self.collaborative_recommender is None:
+                st.warning("No se pudo inicializar el recomendador colaborativo para el modo grupo")
+                return None
+
+            recommender = GroupRecommender(self.collaborative_recommender)
+            st.success("Recomendador de grupo inicializado correctamente")
+            return recommender
+        except Exception as exc:
+            st.error(f"Error: {str(exc)[:100]}")
+            traceback.print_exc()
+            return None
+
     def get_available_genres(self):
         """Devuelve la lista precalculada de generos disponibles."""
         return list(self.available_genres)
@@ -238,6 +258,7 @@ class DataManager(LegacyDataManager):
         self.content_recommender = None
         self.collaborative_recommender = None
         self.hybrid_recommender = None
+        self.group_recommender = None
         self.recommender = None
 
     def _build_available_genres(self):
