@@ -1,0 +1,48 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {section}{\numberline {1}Objetivo y enfoque de la memoria}{3}{section.1}%
+\contentsline {section}{\numberline {2}Datos, preprocesado y organizacion del sistema}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Fuentes de datos de partida}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Limpieza y estructuracion inicial del catalogo}{4}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Separacion entre entrenamiento y test}{5}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}Enriquecimiento del catalogo con TMDb}{5}{subsection.2.4}%
+\contentsline {subsection}{\numberline {2.5}Inicializacion y gestion del registro de usuarios}{6}{subsection.2.5}%
+\contentsline {subsection}{\numberline {2.6}Creacion de nuevos usuarios y actualizacion del perfil}{7}{subsection.2.6}%
+\contentsline {subsection}{\numberline {2.7}Papel de esta fase en el resto del sistema}{8}{subsection.2.7}%
+\contentsline {section}{\numberline {3}Sistema recomendador basado en contenido}{8}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Que informacion utiliza}{8}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Como se representa el usuario}{9}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Como se representan las peliculas}{9}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Calculo del score de recomendacion}{9}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Decisiones de implementacion que interesa justificar}{10}{subsection.3.5}%
+\contentsline {subsection}{\numberline {3.6}Limitaciones a comentar}{10}{subsection.3.6}%
+\contentsline {section}{\numberline {4}Sistema recomendador colaborativo}{10}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Datos de entrada y papel de cada fuente}{10}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Representacion del usuario}{11}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Construccion de la matriz usuario-genero}{11}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Calculo de similitud entre usuarios}{12}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Obtencion y persistencia de vecinos}{13}{subsection.4.5}%
+\contentsline {subsection}{\numberline {4.6}Generacion de peliculas candidatas}{13}{subsection.4.6}%
+\contentsline {subsection}{\numberline {4.7}Prediccion del rating de una pelicula}{14}{subsection.4.7}%
+\contentsline {subsection}{\numberline {4.8}Confianza y score final de ranking}{14}{subsection.4.8}%
+\contentsline {subsection}{\numberline {4.9}Ordenacion final y control de soporte}{15}{subsection.4.9}%
+\contentsline {subsection}{\numberline {4.10}Casos de usuarios nuevos y perfiles incompletos}{15}{subsection.4.10}%
+\contentsline {subsection}{\numberline {4.11}Decisiones de implementacion que interesa destacar}{15}{subsection.4.11}%
+\contentsline {subsection}{\numberline {4.12}Limitaciones a comentar}{16}{subsection.4.12}%
+\contentsline {section}{\numberline {5}Sistema recomendador hibrido}{16}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Idea general}{16}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Normalizacion de puntuaciones}{17}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Pesos dinamicos}{17}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}Que debe explicarse en la mezcla final}{17}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}Decisiones de implementacion que interesa justificar}{18}{subsection.5.5}%
+\contentsline {subsection}{\numberline {5.6}Limitaciones a comentar}{18}{subsection.5.6}%
+\contentsline {section}{\numberline {6}Sistema recomendador para grupos}{18}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Enfoque propuesto}{18}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Que debe explicarse en esta seccion}{19}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Decision de diseno pendiente}{19}{subsection.6.3}%
+\contentsline {section}{\numberline {7}Interfaz y flujo de uso}{19}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Que conviene explicar}{19}{subsection.7.1}%
+\contentsline {section}{\numberline {8}Evaluacion del sistema}{20}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Protocolo de evaluacion que debe describirse}{20}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}Metricas que interesa incluir}{20}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}Que debe contarse en la memoria}{20}{subsection.8.3}%
+\contentsline {section}{\numberline {9}Conclusiones y trabajo pendiente}{20}{section.9}%

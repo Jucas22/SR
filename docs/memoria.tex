@@ -1,0 +1,605 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[spanish]{babel}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{lmodern}
+\usepackage{setspace}
+\usepackage{hyperref}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+
+\onehalfspacing
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=black,
+  pdfauthor={Juan Castello Beltran},
+  pdftitle={Primer boceto de memoria tecnica},
+  pdfsubject={Sistemas Recomendadores},
+  pdfkeywords={Recomendacion, Contenido, Colaborativo, Hibrido, Grupos}
+}
+
+\begin{document}
+\pagenumbering{gobble}
+
+\begin{titlepage}
+\centering
+{\Large Master en Inteligencia Artificial, Reconocimiento de Formas e Imagen Digital \par}
+\vspace{2cm}
+{\huge \bfseries Primer boceto de memoria tecnica\par}
+\vspace{0.8cm}
+{\Large Sistemas recomendadores de peliculas\par}
+\vfill
+\begin{tabular}{ll}
+Alumno: & Juan Castello Beltran \\
+Fecha: & \today
+\end{tabular}
+\vfill
+\end{titlepage}
+
+\clearpage
+\pagenumbering{arabic}
+\tableofcontents
+\newpage
+
+\section{Objetivo y enfoque de la memoria}
+
+Esta memoria debe ir directa al grano: explicar como se ha implementado cada sistema recomendador, que informacion utiliza, que decisiones de diseno se han tomado y que limitaciones presenta cada enfoque. No hace falta dedicar mucho espacio a teoria general; lo importante es describir el comportamiento real del proyecto.
+
+En esta primera version conviene dejar claro desde el principio que el trabajo cubre cuatro bloques:
+
+\begin{itemize}[leftmargin=*]
+\item Sistema recomendador basado en contenido.
+\item Sistema recomendador colaborativo.
+\item Sistema recomendador hibrido.
+\item Sistema recomendador para grupos, incluido como diseno previsto aunque todavia no este implementado.
+\end{itemize}
+
+Tambien es recomendable indicar que la memoria se centra en dos preguntas:
+
+\begin{itemize}[leftmargin=*]
+\item Como se genera la recomendacion en cada caso.
+\item Por que se han elegido esas tecnicas y no otras.
+\end{itemize}
+
+\section{Datos, preprocesado y organizacion del sistema}
+
+Antes de entrenar y utilizar los recomendadores fue necesario construir una capa previa de datos consistente. Esta fase de preprocesado no se limita a limpiar ficheros, sino que define que informacion utilizará cada algoritmo, como se representan las peliculas y de que forma se construye el perfil persistente de los usuarios. En nuestro caso, esta parte tiene ademas un elemento diferencial: el enriquecimiento del catalogo de peliculas con metadatos adicionales obtenidos mediante llamadas a la API de TMDb.
+
+\subsection{Fuentes de datos de partida}
+
+El sistema parte de varios ficheros crudos ubicados en \texttt{Data/Raw\_data/}. Los mas importantes son:
+
+\begin{itemize}[leftmargin=*]
+\item \texttt{peliculas.csv}, que contiene la informacion base del catalogo.
+\item \texttt{ratings\_small.csv}, con las valoraciones de los usuarios.
+\item \texttt{keywords.csv}, que aporta palabras clave por pelicula.
+\item \texttt{generos.csv}, utilizado para traducir los identificadores numericos de genero a nombres legibles.
+\item \texttt{links.csv}, cargado como parte del pipeline original.
+\end{itemize}
+
+Durante esta fase se generan varios artefactos intermedios y finales en la carpeta de datos procesados. Los mas relevantes para el resto del proyecto son:
+
+\begin{itemize}[leftmargin=*]
+\item \texttt{cleaned\_movies.json}
+\item \texttt{cleaned\_ratings.json}
+\item \texttt{train\_ratings.json}
+\item \texttt{test\_ratings.json}
+\item \texttt{enhanced\_movies.json}
+\end{itemize}
+
+A partir de ellos se entrenan o alimentan los distintos recomendadores.
+
+\subsection{Limpieza y estructuracion inicial del catalogo}
+
+El primer paso consiste en cargar los CSV con el formato correcto de separador y decimales, ya que los datos originales vienen con \texttt{;} como delimitador y con coma decimal. Una vez leidos, se aplica una limpieza basica sobre el fichero de ratings: se eliminan todas aquellas valoraciones cuyo \texttt{movieId} ya no existe en el catalogo de peliculas disponible. Esta decision es importante porque evita que los recomendadores aprendan sobre items que despues no pueden mostrarse ni recomendarse.
+
+Tras esta depuracion se genera \texttt{cleaned\_ratings.json}, que actua como version coherente del historial de interacciones. En paralelo se construye \texttt{cleaned\_movies.json}, una estructura mas manejable que resume por pelicula los campos realmente utiles para el sistema: identificador, \texttt{imdb\_id}, titulo, \texttt{poster\_path}, puntuacion media, numero de votos, lista de generos y conjunto de keywords asociadas.
+
+La extraccion de keywords tambien requirio un pequeño preprocesado especifico. En el fichero original las palabras clave aparecen repartidas en varias columnas, de modo que se recorren todas las posiciones relevantes de cada fila, se descartan valores vacios y se construye una lista compacta de keywords por pelicula. Aunque es una transformacion sencilla, tiene bastante impacto posterior porque estas keywords acaban formando parte del espacio textual del recomendador basado en contenido.
+
+\subsection{Separacion entre entrenamiento y test}
+
+Este apartado se ha decidido mantenerlo breve, puesto que es una fase común de todos los trabajos que hacen los distintos grupos de la asignatura, pero aun asi conviene resumirla para contextualizar la evaluacion posterior. A partir de los ratings ya limpios, se realiza un \emph{split} por usuario del 70\% para entrenamiento y del 30\% para test. La division no se hace de forma global, sino usuario a usuario, para garantizar que cada perfil conserve informacion en entrenamiento y que la evaluacion se realice sobre peliculas realmente conocidas por ese mismo usuario en el conjunto de prueba.
+
+Cuando un usuario solo tiene una valoracion, esa valoracion se deja en entrenamiento para no crear perfiles vacios. Ademas, antes de dividir, los ratings de cada usuario se barajan con una semilla fija, de forma que el proceso sea reproducible. El objetivo principal de esta separacion es evitar fuga de informacion: todo lo que se usa para construir perfiles, vecinos y recomendaciones procede exclusivamente del conjunto de entrenamiento, mientras que el conjunto de test queda reservado para medir el rendimiento de los recomendadores.
+
+\subsection{Enriquecimiento del catalogo con TMDb}
+
+La parte de preprocesado en la que mas valor anadido aporta nuestro trabajo es el enriquecimiento del catalogo de peliculas. Aunque el dataset original ya incluye información mínima para poder trabajar, en muchos casos se queda corto para un recomendador basado en contenido que necesite descripciones, señales semánticas y una presentacion visual mas completa en la interfaz. Por ello se desarrollo un script especifico que toma como entrada \texttt{cleaned\_movies.json} y lo amplía mediante consultas a la API de TMDb.
+
+Es importante precisar que, aunque el dataset conserva el campo \texttt{imdb\_id}, el enriquecimiento no se ha realizado directamente contra IMDb, sino contra TMDb. Esto tiene dos ventajas practicas en nuestro proyecto. La primera es que TMDb expone de forma directa un conjunto amplio de metadatos estructurados por pelicula. La segunda es que facilita el tratamiento de imagenes, ya que proporciona el \texttt{poster\_path} y el \texttt{backdrop\_path} oficiales, a partir de los cuales el frontend puede reconstruir la URL completa de la caratula usando la base \texttt{https://image.tmdb.org/t/p/original}.
+
+Desde el punto de vista de implementacion, este enriquecimiento no se hizo de forma secuencial simple, sino mediante un pipeline asincrono por lotes. El script procesa lotes de peliculas y lanza multiples peticiones concurrentes con \texttt{aiohttp}, limitando la concurrencia con un semaforo para no sobrepasar el ritmo permitido por la API. Ademas, incorpora gestion de \emph{rate limit}, archivo de progreso y copias de seguridad parciales. Esto ultimo es relevante porque el catalogo es grande y una interrupcion en mitad del proceso no obligaba a reiniciar todo el enriquecimiento desde cero.
+
+Para cada pelicula se consulta TMDb a partir de su identificador y se fusionan los nuevos datos con la informacion que ya existia en el JSON limpio. Si una pelicula no aparece en TMDb o la peticion falla, se conservan los datos anteriores y simplemente se rellenan los campos nuevos con valores nulos. Si la consulta tiene exito, se actualizan campos ya existentes como \texttt{poster\_path}, \texttt{puntuacion\_media} y \texttt{votos}, y ademas se anaden otros muchos atributos adicionales.
+
+Entre los campos nuevos incorporados destacan:
+
+\begin{itemize}[leftmargin=*]
+\item \texttt{overview} y \texttt{tagline}
+\item \texttt{runtime} y \texttt{release\_date}
+\item \texttt{original\_title} y \texttt{original\_language}
+\item \texttt{homepage}, \texttt{status} y \texttt{popularity}
+\item \texttt{budget} y \texttt{revenue}
+\item \texttt{belongs\_to\_collection} y \texttt{adult}
+\item \texttt{production\_companies}, \texttt{production\_countries} y \texttt{spoken\_languages}
+\item \texttt{vote\_average\_tmdb} y \texttt{vote\_count\_tmdb} como copia explicita de los valores devueltos por TMDb
+\end{itemize}
+
+Este enriquecimiento tiene dos efectos claros sobre el sistema. El primero es visual: mejora la presentacion de las peliculas porque hace mas fiable la recuperacion de la imagen correcta del poster. El segundo es algorítmico: amplía mucho el volumen de informacion disponible para el recomendador basado en contenido, que pasa a trabajar no solo con generos y keywords, sino tambien con \texttt{overview}, \texttt{tagline} y otros metadatos semanticos que ayudan a diferenciar mejor unas peliculas de otras.
+
+\subsection{Inicializacion y gestion del registro de usuarios}
+
+Una vez preparado el catalogo, el siguiente paso es construir el registro persistente de usuarios, almacenado en \texttt{Data/user\_registry.json}. Este fichero es una pieza central del proyecto porque actua como punto comun entre los tres recomendadores: desde aqui se leen las peliculas vistas, las preferencias declaradas, el vector de generos y, en el caso del colaborativo, la lista de vecinos precalculados.
+
+La poblacion inicial del registro se realiza a partir de \texttt{train\_ratings.json}, nunca a partir del conjunto completo de ratings. Esta decision vuelve a estar motivada por la necesidad de evitar fuga de informacion. El script de inicializacion agrupa los ratings de entrenamiento por usuario y, para cada uno, crea una entrada con su identificador, estado, tipo de usuario, peliculas vistas y estadisticas basicas como numero de valoraciones y media de rating. Los usuarios que provienen del dataset se etiquetan como \texttt{existing}, mientras que los que se creen posteriormente desde la aplicacion se marcaran como \texttt{new}.
+
+Sobre ese registro inicial se ejecuta un segundo proceso muy importante: la construccion del \texttt{genre\_vector} de cada usuario. Este vector no se obtiene simplemente contando cuantas peliculas de cada genero ha visto el usuario, sino mediante una acumulacion ponderada centrada en sus ratings. Para cada usuario se calcula primero su media de valoracion. Despues, cada rating individual se transforma en un peso relativo:
+
+\[
+weight = rating - media\_usuario
+\]
+
+Si una pelicula fue puntuada por encima de la media personal del usuario, su contribucion es positiva; si fue puntuada por debajo, su contribucion es negativa. Ese peso se reparte entre los generos de la pelicula y se acumula por genero a lo largo de todo el historial de entrenamiento. Finalmente, las afinidades resultantes se normalizan por usuario al rango $[0,100]$, de forma que 100 representa el genero de mayor afinidad relativa, 0 los generos no vistos o de afinidad minima, y valores intermedios describen el resto del perfil. A partir de este vector tambien se derivan los \texttt{favorite\_genres} del usuario, tomando los generos con mayor puntuacion.
+
+Esta forma de construir el perfil tiene una ventaja importante frente a un conteo binario simple: no solo refleja que generos ha consumido un usuario, sino como los ha valorado respecto a su propio criterio. Ademas, el mismo \texttt{genre\_vector} sirve despues para dos objetivos diferentes: el recomendador basado en contenido lo reduce a sus preferencias mas representativas, mientras que el colaborativo lo utiliza casi completo para comparar usuarios mediante Pearson.
+
+\subsection{Creacion de nuevos usuarios y actualizacion del perfil}
+
+La gestion de usuarios no termina con los perfiles importados del dataset. La aplicacion permite registrar usuarios nuevos desde la interfaz, introduciendo opcionalmente un nombre y una lista inicial de generos favoritos. En el momento del alta se genera un nuevo identificador, se crea una entrada en \texttt{user\_registry.json} y se inicializa su estructura de preferencias con una lista vacia de peliculas vistas y un \texttt{genre\_vector} basico.
+
+Ese vector inicial se construye de forma sencilla: cada genero favorito seleccionado en el registro recibe una afinidad de 100. Esta inicializacion es deliberadamente simple, pero suficiente para que el sistema pueda empezar a recomendar incluso antes de que el usuario haya puntuado peliculas. En otras palabras, permite un manejo razonable del problema de \emph{cold start} para usuarios recien creados.
+
+Cuando un usuario nuevo, o incluso uno ya existente, puntua una pelicula desde la aplicacion, el sistema actualiza varios elementos a la vez. En primer lugar, inserta o modifica la valoracion en \texttt{train\_ratings.json}. En segundo lugar, anade la pelicula a \texttt{watched\_movies} si todavia no estaba presente. En tercer lugar, recalcula su media de valoracion y ajusta el \texttt{genre\_vector} usando los generos de la pelicula puntuada. Este ajuste incremental se realiza mediante una heuristica sencilla: los generos de la pelicula reciben un incremento o decremento proporcional a \texttt{rating - 2.5}, y el resultado se recorta al rango $[0,100]$.
+
+Por ultimo, cuando cambia el perfil de un usuario se invalidan sus vecinos colaborativos y, si existe, la matriz cacheada de preferencias del recomendador colaborativo. Esto obliga a recalcular la informacion de similitud en la siguiente ejecucion y evita que el sistema siga utilizando relaciones de vecindad desactualizadas. Ademas, el colaborativo incorpora un mecanismo de respaldo: si detecta usuarios sin \texttt{genre\_vector} util, intenta derivarlo automaticamente a partir de sus generos favoritos y de las peliculas vistas, para no dejar perfiles vacios.
+
+\subsection{Papel de esta fase en el resto del sistema}
+
+Toda esta etapa de preprocesado condiciona directamente la calidad del recomendador final. El basado en contenido depende del enriquecimiento de peliculas para disponer de senales textuales y semanticas suficientes. El colaborativo depende de que el registro de usuarios y el \texttt{genre\_vector} esten bien construidos para encontrar vecinos fiables. El hibrido, por su parte, hereda tanto las fortalezas como las limitaciones de ambos. Por eso, aunque el preprocesado pueda parecer una fase previa a los algoritmos, en realidad forma parte esencial del comportamiento final del sistema.
+
+\section{Sistema recomendador basado en contenido}
+
+Este apartado debe explicar como se recomienda una pelicula a partir del perfil de gustos del usuario y de las caracteristicas de las peliculas. La idea central es que el sistema no busca usuarios parecidos, sino peliculas cercanas al perfil del usuario.
+
+\subsection{Que informacion utiliza}
+
+\begin{itemize}[leftmargin=*]
+\item El vector de preferencias por genero del usuario.
+\item El historial de ratings del usuario.
+\item Las peliculas ya vistas por el usuario.
+\item Los metadatos de cada pelicula: generos, \texttt{overview}, \texttt{tagline}, \texttt{keywords}, \texttt{tags}, \texttt{cast}, \texttt{crew} y \texttt{director}.
+\end{itemize}
+
+\subsection{Como se representa el usuario}
+
+Aqui conviene explicar que el perfil del usuario no sale de una sola fuente, sino de la combinacion de dos componentes:
+
+\begin{itemize}[leftmargin=*]
+\item Un perfil de generos obtenido desde \texttt{genre\_vector}.
+\item Un perfil historico construido a partir de las peliculas puntuadas por el usuario.
+\end{itemize}
+
+En la implementacion actual se aplica una reduccion del vector de generos para quedarse solo con las preferencias mas representativas. Esta decision encaja con las indicaciones de la asignatura: no se borra el vector original, sino que se genera un nuevo subconjunto con aproximadamente 5--8 generos relevantes. En esta seccion se debe justificar por que esa reduccion ayuda a eliminar ruido y evita que el perfil del usuario parezca demasiado uniforme.
+
+Tambien debe explicarse que el perfil final combina ambos bloques con pesos fijos:
+
+\[
+perfil\_final =
+0.70 \cdot perfil\_generos + 0.30 \cdot perfil\_historico
+\]
+
+\subsection{Como se representan las peliculas}
+
+La memoria debe contar que cada pelicula se transforma en un vector de caracteristicas con dos partes:
+
+\begin{itemize}[leftmargin=*]
+\item Bloque estructural de generos, codificado de forma multietiqueta.
+\item Bloque textual construido con TF-IDF sobre los metadatos semanticos de la pelicula.
+\end{itemize}
+
+Es importante explicar dos decisiones concretas:
+
+\begin{itemize}[leftmargin=*]
+\item Los generos se normalizan para que peliculas y usuarios usen el mismo vocabulario.
+\item El texto no se limita a la sinopsis, sino que incorpora senales semanticas adicionales como palabras clave, reparto o direccion.
+\end{itemize}
+
+\subsection{Calculo del score de recomendacion}
+
+Una vez construidos el perfil del usuario y el espacio de items, la recomendacion se obtiene calculando una puntuacion para cada pelicula candidata no vista:
+
+\[
+score(u,i) =
+0.60 \cdot sim_{genre}(u,i) +
+0.25 \cdot sim_{text}(u,i) +
+0.10 \cdot quality(i) +
+0.05 \cdot popularity(i)
+\]
+
+En esta parte conviene explicar:
+
+\begin{itemize}[leftmargin=*]
+\item Como se calcula la similitud por generos.
+\item Como se calcula la similitud textual.
+\item Por que se anaden las senales de calidad y popularidad.
+\item Que las peliculas ya vistas se eliminan antes del ranking final.
+\item Que se aplica un pequeno control de diversidad para evitar recomendaciones demasiado redundantes.
+\end{itemize}
+
+\subsection{Decisiones de implementacion que interesa justificar}
+
+\begin{itemize}[leftmargin=*]
+\item Reducir el vector de preferencias a un subconjunto mas discriminativo.
+\item Combinar gustos declarados y comportamiento historico.
+\item Dar mas peso a la afinidad por genero que a la similitud textual.
+\item Mantener explicabilidad mediante razones asociadas a cada recomendacion.
+\end{itemize}
+
+\subsection{Limitaciones a comentar}
+
+\begin{itemize}[leftmargin=*]
+\item El sistema depende mucho de la calidad de los metadatos.
+\item Puede tender a recomendar peliculas demasiado parecidas entre si.
+\item Si el usuario tiene poco historial, el perfil historico aporta poca informacion.
+\end{itemize}
+
+\section{Sistema recomendador colaborativo}
+
+El sistema recomendador colaborativo se basa en una idea distinta al recomendador basado en contenido. Aqui no se comparan peliculas entre si, sino usuarios entre si. El objetivo es detectar que usuarios tienen perfiles de gusto parecidos y reutilizar las valoraciones de esos usuarios similares para recomendar peliculas al usuario objetivo. Por tanto, el algoritmo responde a la pregunta: si otros usuarios con gustos parecidos han puntuado bien una pelicula que yo todavia no he visto, hasta que punto es razonable pensar que esa pelicula tambien puede interesarme.
+
+\subsection{Datos de entrada y papel de cada fuente}
+
+La implementacion colaborativa se apoya sobre tres fuentes principales:
+
+\begin{itemize}[leftmargin=*]
+\item \texttt{user\_registry.json}, donde se almacenan los usuarios activos, su \texttt{genre\_vector}, sus peliculas vistas y, en muchos casos, los vecinos ya precalculados.
+\item \texttt{train\_ratings.json}, que contiene las valoraciones historicas utilizadas tanto para construir candidatos como para calcular la prediccion final de rating.
+\item \texttt{enhanced\_movies.json}, que en este modelo no se usa para medir similitud entre usuarios, pero si sirve para recuperar informacion de las peliculas y para derivar generos cuando un usuario no tiene todavia un vector de preferencias completo.
+\end{itemize}
+
+Ademas, el sistema guarda un artefacto auxiliar muy importante: la matriz de preferencias usuario-genero se cachea en un fichero \texttt{npz}. Esto evita reconstruir toda la estructura en cada ejecucion y hace viable reutilizar el colaborativo en la aplicacion sin recalcular desde cero la comparacion entre miles de pares de usuarios.
+
+\subsection{Representacion del usuario}
+
+La decision de modelado mas importante de este recomendador es que cada usuario se representa mediante un vector de afinidad por genero, y no mediante una matriz usuario-item clasica. Es decir, cada usuario queda descrito por una estructura del tipo:
+
+\[
+\vec{p_u} = [p_{u1}, p_{u2}, \dots, p_{un}]
+\]
+
+donde cada componente indica cuanto le interesa al usuario un genero concreto en una escala normalizada entre 0 y 100. Este vector procede del preprocesado descrito anteriormente y resume el comportamiento historico del usuario de forma mucho mas compacta que una matriz con miles de peliculas.
+
+Esta eleccion esta justificada por dos razones. La primera es que el catalogo de peliculas es muy grande y una matriz usuario-item seria mucho mas dispersa. La segunda es que, para buscar vecinos, nos interesa una representacion que concentre la senal de preferencia y reduzca el problema de falta de solapamiento entre usuarios. En lugar de comparar si dos personas han puntuado exactamente las mismas peliculas, comparamos si muestran patrones similares de afinidad hacia los generos.
+
+\subsection{Construccion de la matriz usuario-genero}
+
+A partir de esos vectores individuales se construye una matriz usuario-genero en la que cada fila representa un usuario activo y cada columna representa un genero. Para que la matriz sea consistente, primero se fija un orden estable de generos; despues, para cada usuario, se genera una fila numerica siguiendo exactamente ese mismo orden. Si un genero no aparece en el perfil del usuario, su valor se rellena con 0.
+
+Formalmente, si hay $m$ usuarios activos y $n$ generos, la matriz resultante puede verse como:
+
+\[
+M \in \mathbb{R}^{m \times n}
+\]
+
+El sistema mantiene tambien dos mapeos auxiliares para poder pasar de identificadores logicos de usuario a indices de fila y viceversa:
+
+\begin{itemize}[leftmargin=*]
+\item \texttt{user\_id\_to\_idx}
+\item \texttt{idx\_to\_user\_id}
+\end{itemize}
+
+Una vez creada, la matriz se guarda en disco como \texttt{csr\_matrix}. El uso de un formato disperso no cambia el significado del algoritmo, pero mejora la gestion de memoria y la reutilizacion posterior.
+
+Hay ademas un detalle importante de robustez: antes de construir la matriz, el colaborativo comprueba si existen usuarios activos cuyo \texttt{genre\_vector} este vacio o no tenga valores positivos. Si eso ocurre, intenta derivar un perfil minimo a partir de los generos favoritos declarados y de las peliculas vistas. De esta forma se evita dejar usuarios inutilizables dentro del sistema y se reduce el numero de casos en los que la recomendacion colaborativa no puede arrancar.
+
+\subsection{Calculo de similitud entre usuarios}
+
+La similitud entre usuarios se calcula con el coeficiente de correlacion de Pearson. Esta medida no se limita a comprobar si dos usuarios tienen valores altos en las mismas dimensiones, sino que capta si la forma general de sus preferencias evoluciona de manera parecida. Por eso es una opcion adecuada cuando queremos comparar perfiles relativos y no solo magnitudes absolutas.
+
+Dados dos vectores de preferencias $\vec{p_u}$ y $\vec{p_v}$, la similitud se calcula como:
+
+\[
+sim(u,v) =
+\frac{\sum_k (p_{uk} - \bar{p_u})(p_{vk} - \bar{p_v})}
+{\sqrt{\sum_k (p_{uk} - \bar{p_u})^2} \cdot \sqrt{\sum_k (p_{vk} - \bar{p_v})^2}}
+\]
+
+El resultado queda en el rango $[-1,1]$. En esta implementacion solo se conservan vecinos con similitud positiva. Si el denominador es 0, la similitud se fuerza a 0 para evitar resultados inestables o indefinidos.
+
+Uno de los puntos metodologicos mas importantes del trabajo es decidir sobre que parte del vector se calcula Pearson. En nuestro caso no se usa siempre la misma regla. Si dos usuarios comparten suficientes generos con valor no nulo, se calcula la correlacion sobre esa interseccion de preferencias realmente expresadas. Si el numero de preferencias comunes no alcanza el umbral fijado, se utiliza la union completa del vector, es decir, todo el espacio de generos con ceros incluidos. En el codigo actual, el umbral minimo se fija en:
+
+\[
+MIN\_COMMON\_PREFS = 10
+\]
+
+Esta estrategia hibrida entre interseccion y union esta alineada con las transparencias de la asignatura y responde a un compromiso razonable. Cuando hay bastante informacion comun, la interseccion es mas informativa porque compara gustos efectivamente compartidos. Cuando el solapamiento es pequeno, limitarse a unos pocos generos puede producir correlaciones artificiales; en esos casos es preferible usar mas contexto y hacer la comparacion mas conservadora.
+
+\subsection{Obtencion y persistencia de vecinos}
+
+Una vez calculada la similitud del usuario objetivo frente al resto de usuarios activos, se descartan el propio usuario y todas las correlaciones no positivas. Los candidatos restantes se ordenan de mayor a menor similitud y se conservan como maximo los $N$ mejores vecinos. En la implementacion actual ese maximo es:
+
+\[
+top\_n = 40
+\]
+
+La eleccion de un maximo de 40 vecinos busca equilibrar calidad y coste. Si se incluyen demasiados vecinos, acaban entrando usuarios poco parecidos que introducen ruido en la prediccion. Si se usan muy pocos, la recomendacion puede quedar dominada por una evidencia demasiado debil. Por eso se adopta una lista acotada pero suficientemente amplia.
+
+Es importante comentar en la memoria que la correlacion de Pearson es simetrica, pero la relacion de vecindad no tiene por que serlo. Dos usuarios pueden tener la misma similitud numerica, pero si uno entra en el top-40 del otro y no al reves, la relacion final de vecindad sera asimetrica. El sistema permite ademas precalcular esta informacion para todos los usuarios y guardarla en el registro, de modo que la aplicacion pueda reutilizarla sin repetir el proceso en cada recomendacion.
+
+\subsection{Generacion de peliculas candidatas}
+
+Una vez obtenida la lista de vecinos, el siguiente paso es generar el conjunto de peliculas candidatas. En este modelo una pelicula candidata es una pelicula que cumple dos condiciones: ha sido puntuada favorablemente por al menos un vecino y no figura entre las peliculas ya vistas por el usuario objetivo. La nocion de puntuacion favorable tambien esta parametrizada en el codigo, y actualmente se considera favorable cualquier rating mayor o igual que:
+
+\[
+FAVORABLE\_RATING\_THRESHOLD = 3.5
+\]
+
+El proceso es sencillo pero importante: para cada vecino se recorren sus ratings de entrenamiento, se seleccionan solo las peliculas bien valoradas y se filtran aquellas que el usuario ya tenga en \texttt{watched\_movies}. El uso de un conjunto elimina automaticamente duplicados, de forma que si varios vecinos han visto una misma pelicula, esta pelicula sigue apareciendo una sola vez en la lista de candidatos.
+
+\subsection{Prediccion del rating de una pelicula}
+
+Una vez construidos los candidatos, el sistema estima un rating predicho para cada pelicula. Para ello se buscan los vecinos que realmente contribuyen a ese item concreto, es decir, vecinos que lo hayan puntuado en \texttt{train\_ratings.json}. Cada contribuidor aporta dos datos: su similitud con el usuario objetivo y la puntuacion que dio a la pelicula.
+
+La prediccion principal se calcula mediante una media ponderada por similitud:
+
+\[
+\hat{r}_{ui} =
+\frac{\sum_{v \in V_u(i)} sim(u,v)\, r_{vi}}
+{\sum_{v \in V_u(i)} |sim(u,v)|}
+\]
+
+donde $V_u(i)$ es el subconjunto de vecinos de $u$ que han puntuado la pelicula $i$. Esta formula hace que las valoraciones de vecinos mas parecidos tengan mas peso en el resultado final. Si por algun motivo el denominador resulta 0, la prediccion se fija a 0.
+
+\subsection{Confianza y score final de ranking}
+
+Una diferencia importante respecto a una implementacion colaborativa basica es que aqui no se usa solo el rating predicho para ordenar peliculas. El sistema calcula tambien una medida de confianza. La confianza depende de dos elementos: la similitud media de los vecinos que contribuyen a la pelicula y el soporte de la recomendacion, es decir, cuantos vecinos participan realmente en esa prediccion.
+
+Para medir soporte se utiliza una referencia fija de tres contribuyentes:
+
+\[
+CONFIDENCE\_NEIGHBOR\_TARGET = 3
+\]
+
+Con ello se define un \texttt{support\_ratio} acotado en $[0,1]$:
+
+\[
+support\_ratio(u,i) =
+\min\left(1,\frac{num\_contributors(u,i)}{3}\right)
+\]
+
+La confianza final se calcula como:
+
+\[
+confidence(u,i) =
+mean\_similarity(u,i) \cdot support\_ratio(u,i)
+\]
+
+Y el score utilizado para ordenar candidatos queda definido como:
+
+\[
+ranking\_score(u,i) = \hat{r}_{ui} \cdot confidence(u,i)
+\]
+
+Esta parte es clave para justificar el comportamiento del algoritmo. Dos peliculas pueden tener un rating predicho parecido, pero no ofrecer el mismo grado de fiabilidad. Una recomendacion sostenida por varios vecinos muy similares es mas creible que otra basada en un unico vecino o en similitudes muy bajas. Por eso separar prediccion y confianza mejora el ranking final.
+
+\subsection{Ordenacion final y control de soporte}
+
+Una vez calculadas las predicciones, el sistema no ordena todas las peliculas por igual. Primero separa las recomendaciones fuertes de las debiles. Se considera fuerte una recomendacion respaldada por al menos:
+
+\[
+MIN\_RECOMMENDATION\_CONTRIBUTORS = 2
+\]
+
+Las peliculas con soporte suficiente se colocan delante de las que solo tienen un contribuidor. Dentro de cada grupo, la ordenacion se hace por \texttt{ranking\_score}, despues por confianza, despues por rating predicho, similitud media y numero de contribuidores. Esta decision evita que una pelicula con nota muy alta pero respaldada por un unico vecino domine injustificadamente la lista final.
+
+El resultado que devuelve el recomendador puede ser simple, si solo queremos la pelicula y su rating predicho, o detallado, si se desea informacion adicional para depuracion o explicacion. En este segundo caso se exponen tambien el numero de contribuidores, la similitud media, la confianza y el \texttt{ranking\_score}.
+
+\subsection{Casos de usuarios nuevos y perfiles incompletos}
+
+El colaborativo es el modelo mas sensible al problema de \emph{cold start}. Si un usuario nuevo no tiene apenas historial y tampoco dispone de un \texttt{genre\_vector} util, la busqueda de vecinos puede ser muy pobre o incluso imposible. Para reducir ese problema, el sistema intenta reconstruir un perfil inicial a partir de \texttt{favorite\_genres} y de las peliculas vistas. Los generos favoritos reciben un peso mayor que las peliculas vistas, y el resultado se normaliza al rango $[0,100]$.
+
+Este mecanismo no sustituye a un perfil aprendido con ratings reales, pero permite que el sistema tenga una base minima sobre la que buscar vecinos. Aun asi, si el usuario no ofrece suficiente informacion o si no se encuentran vecinos con correlacion positiva, el recomendador colaborativo simplemente no genera recomendaciones utiles. Esta limitacion es inherente al enfoque.
+
+\subsection{Decisiones de implementacion que interesa destacar}
+
+\begin{itemize}[leftmargin=*]
+\item El algoritmo compara usuarios por preferencias de genero y no por coincidencia directa en items, para reducir dispersion y hacer mas estable la similitud.
+\item Se usa Pearson porque capta la forma relativa del perfil y no solo la magnitud de las puntuaciones.
+\item La comparacion mezcla interseccion y union de preferencias segun el solapamiento disponible, con un umbral de 10 preferencias comunes.
+\item La recomendacion no se ordena solo por rating predicho; tambien incorpora confianza y soporte vecinal.
+\item Los vecinos pueden persistirse en el registro de usuarios para ahorrar coste en tiempo de ejecucion.
+\end{itemize}
+
+\subsection{Limitaciones a comentar}
+
+\begin{itemize}[leftmargin=*]
+\item La calidad del sistema depende mucho de la calidad del \texttt{genre\_vector} construido en el preprocesado.
+\item Si los usuarios tienen perfiles pobres o demasiado dispersos, pueden aparecer falsos vecinos o no encontrarse vecinos utiles.
+\item El modelo sigue siendo sensible al \emph{sparsity}: aunque se reduzca el espacio a generos, no todos los usuarios ofrecen la misma cantidad de informacion.
+\item La prediccion final se apoya en heuristicas de confianza y umbrales fijos, que podrian ajustarse mejor mediante evaluacion experimental.
+\end{itemize}
+
+\section{Sistema recomendador hibrido}
+
+El sistema hibrido debe presentarse como una combinacion ponderada de los dos enfoques anteriores. El objetivo de esta seccion es explicar como se mezclan las listas y por que los pesos no son fijos.
+
+\subsection{Idea general}
+
+La recomendacion hibrida sigue tres pasos:
+
+\begin{itemize}[leftmargin=*]
+\item Obtener una lista de candidatos del recomendador basado en contenido.
+\item Obtener una lista de candidatos del recomendador colaborativo.
+\item Unificar ambas listas y recalcular una puntuacion comun para ordenar los items finales.
+\end{itemize}
+
+\subsection{Normalizacion de puntuaciones}
+
+Uno de los puntos que hay que explicar mejor en la memoria es que ambos modelos no producen ratios en la misma escala. Por eso, antes de mezclar:
+
+\begin{itemize}[leftmargin=*]
+\item El score de contenido se interpreta ya en el rango $[0,1]$.
+\item El score colaborativo se normaliza a partir de \texttt{ranking\_score} para llevarlo tambien a $[0,1]$.
+\end{itemize}
+
+Esta justificacion es importante porque evita una mezcla engañosa en la que un modelo domine al otro por pura escala numerica.
+
+\subsection{Pesos dinamicos}
+
+La mezcla final se expresa como:
+
+\[
+score_{hibrido}(u,i) =
+\alpha_u \cdot score_{contenido}(u,i) +
+\beta_u \cdot score_{colaborativo}(u,i)
+\]
+
+con la restriccion:
+
+\[
+\alpha_u + \beta_u = 1
+\]
+
+La memoria debe remarcar que $\alpha$ y $\beta$ no son constantes. Se calculan en cada recomendacion a partir de la informacion disponible para ese usuario:
+
+\begin{itemize}[leftmargin=*]
+\item La senal de contenido depende de la calidad del perfil de generos, del historial y del numero de candidatos que el modelo es capaz de generar.
+\item La senal colaborativa depende del numero de vecinos, de su similitud media y del soporte de candidatos.
+\item Antes de normalizar, ambas senales se suavizan para que el hibrido no se convierta en un sistema casi monolitico cuando las dos fuentes aportan informacion util.
+\end{itemize}
+
+\subsection{Que debe explicarse en la mezcla final}
+
+\begin{itemize}[leftmargin=*]
+\item Como se eliminan items duplicados entre ambas listas.
+\item Como se combinan las contribuciones de contenido y colaborativo para un mismo item.
+\item Por que se usa un conjunto de candidatos amplio antes de quedarse con el top final.
+\item Como se generan explicaciones del resultado hibrido indicando el peso relativo de cada enfoque.
+\end{itemize}
+
+\subsection{Decisiones de implementacion que interesa justificar}
+
+\begin{itemize}[leftmargin=*]
+\item Usar pesos dinamicos en lugar de fijar una mezcla constante 50/50.
+\item Normalizar las escalas antes de combinar scores.
+\item Aprovechar la robustez del contenido y la capacidad de descubrimiento del colaborativo.
+\end{itemize}
+
+\subsection{Limitaciones a comentar}
+
+\begin{itemize}[leftmargin=*]
+\item Los pesos siguen siendo heuristicas, no parametros aprendidos automaticamente.
+\item El modelo depende de que ambos recomendadores base funcionen de forma razonable.
+\item Su calibracion ideal deberia validarse con evaluacion offline.
+\end{itemize}
+
+\section{Sistema recomendador para grupos}
+
+Aunque esta parte todavia no este implementada, es conveniente reservar ya una seccion especifica en la memoria para dejar claro como se planteara el diseno. El objetivo de este bloque es mostrar la logica prevista y las decisiones que habra que cerrar en la siguiente iteracion.
+
+\subsection{Enfoque propuesto}
+
+La idea general es seguir un esquema de agregacion de items:
+
+\begin{itemize}[leftmargin=*]
+\item Seleccionar los usuarios que forman el grupo.
+\item Elegir una unica tecnica de recomendacion para todos los miembros del grupo: contenido, colaborativa o hibrida.
+\item Obtener una recomendacion individual para cada usuario.
+\item Eliminar las peliculas que aparezcan en el historico de cualquier miembro del grupo.
+\item Agregar las listas individuales en una lista comun para el grupo.
+\item Calcular un ratio final de interes del grupo para cada item.
+\end{itemize}
+
+\subsection{Que debe explicarse en esta seccion}
+
+\begin{itemize}[leftmargin=*]
+\item Que tecnica de agregacion se elige finalmente y por que.
+\item Cuantos usuarios como maximo se permiten por grupo.
+\item Como se combinan items repetidos entre distintas listas individuales.
+\item Que ocurre cuando un item gusta mucho a unos miembros y poco a otros.
+\item Como se interpretara el score grupal en la interfaz.
+\end{itemize}
+
+\subsection{Decision de diseno pendiente}
+
+Como primer planteamiento razonable, la memoria puede dejar planteado que se compararan tecnicas de agregacion sencillas y explicables, por ejemplo:
+
+\begin{itemize}[leftmargin=*]
+\item \emph{Average}, si se quiere priorizar el consenso medio.
+\item \emph{Borda count}, si se quiere premiar la presencia recurrente de un item en varias listas.
+\item \emph{Least misery}, si se quiere evitar recomendaciones muy malas para algun miembro del grupo.
+\end{itemize}
+
+Aunque todavia no haya codigo, incluir este apartado en la memoria es util porque muestra continuidad del trabajo y deja definida la extension natural del sistema.
+
+\section{Interfaz y flujo de uso}
+
+Esta seccion puede ser breve, pero ayuda a conectar los algoritmos con la aplicacion final. La memoria debe indicar que la interfaz permite seleccionar el tipo de recomendador y mostrar las recomendaciones resultantes al usuario.
+
+\subsection{Que conviene explicar}
+
+\begin{itemize}[leftmargin=*]
+\item Que el frontend permite elegir entre contenido, colaborativo e hibrido.
+\item Que las recomendaciones se presentan sobre peliculas no vistas por el usuario.
+\item Que el sistema puede mostrar informacion adicional para ayudar a interpretar la recomendacion.
+\item Que el futuro recomendador de grupos deberia integrarse en este mismo flujo de seleccion.
+\end{itemize}
+
+\section{Evaluacion del sistema}
+
+Aunque la evaluacion todavia no este cerrada, la memoria deberia reservar ya este apartado porque forma parte natural del trabajo y permite comparar tecnicas de forma objetiva.
+
+\subsection{Protocolo de evaluacion que debe describirse}
+
+\begin{itemize}[leftmargin=*]
+\item Usar usuarios del dataset, no usuarios sinteticos.
+\item Seleccionar un conjunto fijo de usuarios para comparar todos los recomendadores en igualdad de condiciones.
+\item Generar recomendaciones con el conjunto de entrenamiento y contrastarlas con el conjunto de test.
+\item Eliminar de la comparacion peliculas que ya no existan en el catalogo procesado.
+\end{itemize}
+
+\subsection{Metricas que interesa incluir}
+
+\begin{itemize}[leftmargin=*]
+\item Precision.
+\item Recall.
+\item F1.
+\item MAE.
+\item nDCG.
+\end{itemize}
+
+\subsection{Que debe contarse en la memoria}
+
+\begin{itemize}[leftmargin=*]
+\item Que mide cada metrica y por que es util.
+\item Como se construyen las listas comparadas para cada metrica.
+\item Como se comparan entre si contenido, colaborativo e hibrido.
+\item Que sistema funciona mejor segun acierto, cobertura y calidad del ranking.
+\end{itemize}
+
+\section{Conclusiones y trabajo pendiente}
+
+La memoria deberia cerrarse con un apartado muy sintetico de conclusiones. No hace falta repetir toda la teoria; basta con resumir que aporta cada recomendador y que compromisos presenta.
+
+Aqui conviene dejar tres ideas claras:
+
+\begin{itemize}[leftmargin=*]
+\item El recomendador basado en contenido es el mas interpretable y robusto cuando hay pocos usuarios.
+\item El colaborativo aporta descubrimiento, pero depende mas de la calidad del perfil y de los vecinos disponibles.
+\item El hibrido busca equilibrar ambos enfoques y es el candidato natural a mejor recomendador general, aunque todavia necesite calibracion mediante evaluacion.
+\end{itemize}
+
+Por ultimo, esta seccion debe mencionar de forma explicita el trabajo pendiente:
+
+\begin{itemize}[leftmargin=*]
+\item Implementar el recomendador para grupos.
+\item Completar la evaluacion experimental offline.
+\item Ajustar pesos y umbrales a partir de resultados medidos.
+\end{itemize}
+
+\end{document}
