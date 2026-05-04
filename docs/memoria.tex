@@ -164,89 +164,84 @@ Toda esta etapa de preprocesado condiciona directamente la calidad del recomenda
 
 \section{Sistema recomendador basado en contenido}
 
-Este apartado debe explicar como se recomienda una pelicula a partir del perfil de gustos del usuario y de las caracteristicas de las peliculas. La idea central es que el sistema no busca usuarios parecidos, sino peliculas cercanas al perfil del usuario.
+Este apartado explica como se recomienda una pelicula a partir del perfil de gustos del usuario, de las caracteristicas de las peliculas y otras características. A continuación se define el calculo del \textit{rating} del recomendador basado en contenido para que sea coherente con una formulacion interpretable y estable. El objetivo es priorizar la personalizacion del usuario, sin perder senales de calidad global, fiabilidad estadistica de cada pelicula y una medida semantica adicional basada en el contenido textual.
 
-\subsection{Que informacion utiliza}
+\subsection{Funcion de rating implementada}
 
-\begin{itemize}[leftmargin=*]
-\item El vector de preferencias por genero del usuario.
-\item El historial de ratings del usuario.
-\item Las peliculas ya vistas por el usuario.
-\item Los metadatos de cada pelicula: generos, \texttt{overview}, \texttt{tagline}, \texttt{keywords}, \texttt{tags}, \texttt{cast}, \texttt{crew} y \texttt{director}.
-\end{itemize}
-
-\subsection{Como se representa el usuario}
-
-Aqui conviene explicar que el perfil del usuario no sale de una sola fuente, sino de la combinacion de dos componentes:
-
-\begin{itemize}[leftmargin=*]
-\item Un perfil de generos obtenido desde \texttt{genre\_vector}.
-\item Un perfil historico construido a partir de las peliculas puntuadas por el usuario.
-\end{itemize}
-
-En la implementacion actual se aplica una reduccion del vector de generos para quedarse solo con las preferencias mas representativas. Esta decision encaja con las indicaciones de la asignatura: no se borra el vector original, sino que se genera un nuevo subconjunto con aproximadamente 5--8 generos relevantes. En esta seccion se debe justificar por que esa reduccion ayuda a eliminar ruido y evita que el perfil del usuario parezca demasiado uniforme.
-
-Tambien debe explicarse que el perfil final combina ambos bloques con pesos fijos:
+La puntuacion final estimada para un usuario \(u\) y una pelicula \(i\) se define como:
 
 \[
-perfil\_final =
-0.70 \cdot perfil\_generos + 0.30 \cdot perfil\_historico
+r_{ui} = \alpha \cdot Score_{contenido}(u,i) + \beta \cdot Score_{calidad}(i) + \gamma \cdot Score_{popularidad}(i) + \delta \cdot Score_{similitud}(u,i)
 \]
 
-\subsection{Como se representan las peliculas}
+con los pesos:
+\[
+\alpha = 0.50,\quad \beta = 0.20,\quad \gamma = 0.15,\quad \delta = 0.15
+\]
 
-La memoria debe contar que cada pelicula se transforma en un vector de caracteristicas con dos partes:
+Esta formulacion mantiene el peso principal en las preferencias del usuario, incorporando adicionalmente una componente semantica que permite capturar similitudes mas finas entre peliculas.
 
-\begin{itemize}[leftmargin=*]
-\item Bloque estructural de generos, codificado de forma multietiqueta.
-\item Bloque textual construido con TF-IDF sobre los metadatos semanticos de la pelicula.
-\end{itemize}
+\subsection{Componentes del modelo}
 
-Es importante explicar dos decisiones concretas:
+\subsubsection{Score de contenido}
+Se calcula a partir de la coincidencia entre generos de la pelicula y preferencias de genero del usuario (normalizadas). Para cada pelicula se obtiene una afinidad en \([0,1]\), ponderando la intensidad de preferencia y dividiendo por el numero de generos del item para evitar sesgo hacia peliculas con muchas etiquetas.
 
-\begin{itemize}[leftmargin=*]
-\item Los generos se normalizan para que peliculas y usuarios usen el mismo vocabulario.
-\item El texto no se limita a la sinopsis, sino que incorpora senales semanticas adicionales como palabras clave, reparto o direccion.
-\end{itemize}
+\subsubsection{Score de calidad}
+Se normaliza la valoracion media de la pelicula a \([0,1]\):
+\[
+Score_{calidad} = \frac{vote\_average}{10}
+\]
+Cuando no existe esta metrica, se aplica \textit{fallback} usando medias historicas de ratings disponibles.
 
-\subsection{Calculo del score de recomendacion}
+\subsubsection{Score de popularidad}
+Se modela la fiabilidad de la valoracion mediante una normalizacion logaritmica del numero de votos:
+\[
+Score_{popularidad} = \frac{\log(1+votos)}{\log(1+votos_{max})}
+\]
+Si no hay \texttt{vote\_count}, se usa como \textit{fallback} el numero de valoraciones historicas del dataset de entrenamiento.
 
-Una vez construidos el perfil del usuario y el espacio de items, la recomendacion se obtiene calculando una puntuacion para cada pelicula candidata no vista:
+\subsubsection{Score de similitud semantica}
+Se introduce una componente adicional basada en la similitud del coseno entre representaciones vectoriales del contenido textual (\textit{overview}) de las peliculas. En lugar de comparar directamente peliculas entre si, se construye un perfil textual del usuario agregando los \textit{overviews} de las peliculas mejor valoradas por dicho usuario.
+
+Formalmente:
 
 \[
-score(u,i) =
-0.60 \cdot sim_{genre}(u,i) +
-0.25 \cdot sim_{text}(u,i) +
-0.10 \cdot quality(i) +
-0.05 \cdot popularity(i)
+Score_{similitud}(u,i) = \cos(\vec{profile}_u, \vec{overview}_i)
 \]
 
-En esta parte conviene explicar:
-
+donde:
 \begin{itemize}[leftmargin=*]
-\item Como se calcula la similitud por generos.
-\item Como se calcula la similitud textual.
-\item Por que se anaden las senales de calidad y popularidad.
-\item Que las peliculas ya vistas se eliminan antes del ranking final.
-\item Que se aplica un pequeno control de diversidad para evitar recomendaciones demasiado redundantes.
+\item \(\vec{overview}_i\) es la representacion vectorial del \textit{overview} de la pelicula \(i\).
+\item \(\vec{profile}_u\) es el perfil textual del usuario, obtenido como combinacion ponderada de los \textit{overviews} de las peliculas previamente valoradas positivamente.
 \end{itemize}
 
-\subsection{Decisiones de implementacion que interesa justificar}
+Esta componente permite capturar similitudes semanticas que no quedan reflejadas unicamente mediante generos, refinando la calidad de la recomendacion. Su peso se mantiene moderado para no desplazar las senales principales del modelo.
+
+\subsection{Cambios de implementacion realizados}
+
+Se aplican los siguientes cambios principales en el modulo \texttt{content\_based.py}:
 
 \begin{itemize}[leftmargin=*]
-\item Reducir el vector de preferencias a un subconjunto mas discriminativo.
-\item Combinar gustos declarados y comportamiento historico.
-\item Dar mas peso a la afinidad por genero que a la similitud textual.
-\item Mantener explicabilidad mediante razones asociadas a cada recomendacion.
+\item Se incorpora el nuevo parametro \texttt{delta} asociado a la similitud semantica.
+\item Se sustituye la combinacion anterior basada unicamente en senales estructuradas por una combinacion de \textbf{contenido + calidad + popularidad + similitud textual}.
+\item Se implementa el calculo de afinidad por generos con caches auxiliares para mejorar rendimiento.
+\item Se anade la generacion del perfil textual del usuario a partir de \textit{overviews} previamente valorados.
+\item Se integra el calculo de similitud coseno sobre representaciones vectoriales.
+\item Se adapta el ranking inicial de candidatos para priorizar la afinidad de contenido.
+\item Se mantiene la normalizacion final del score para presentacion y ordenacion estable.
 \end{itemize}
 
-\subsection{Limitaciones a comentar}
+\subsection{Explicabilidad y trazabilidad}
+
+Ademas del calculo, se redisena la explicacion de recomendaciones para que refleje exactamente la formula del modelo. Para cada pelicula recomendada se muestra:
 
 \begin{itemize}[leftmargin=*]
-\item El sistema depende mucho de la calidad de los metadatos.
-\item Puede tender a recomendar peliculas demasiado parecidas entre si.
-\item Si el usuario tiene poco historial, el perfil historico aporta poca informacion.
+\item la combinacion ponderada aplicada (\(\alpha,\beta,\gamma,\delta\)),
+\item el desglose de los cuatro componentes (\textit{contenido, calidad, popularidad, similitud}),
+\item una justificacion semantica basada en coincidencia de generos y proximidad textual con el perfil del usuario.
 \end{itemize}
+
+En la interfaz, tambien se ha añadido este desglose en las tarjetas de recomendacion del modo basado en contenido, mejorando la interpretabilidad para el usuario final y facilitando la validacion del comportamiento del sistema.
 
 \section{Sistema recomendador colaborativo}
 
