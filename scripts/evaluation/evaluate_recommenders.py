@@ -12,6 +12,7 @@ Genera:
 Uso:
     python -m scripts.evaluation.evaluate_recommenders
 """
+
 from __future__ import annotations
 
 import json
@@ -37,11 +38,11 @@ from Backend.recommenders.hybrid import HybridRecommender
 # Parametros de evaluacion
 # ---------------------------------------------------------------------------
 SEED = 42
-N_USERS = 10          # None = todos los usuarios de test
-TOP_K = 50              # tamano de la lista de recomendaciones por usuario
-MIN_TEST_RATINGS = 5    # incluir todos los usuarios con al menos 5 ratings en test
-UMBRAL_REC = 3.5        # umbral para considerar un item recomendado relevante
-UMBRAL_TEST = 3.5       # umbral para considerar un item de test relevante
+N_USERS = 20  # None = todos los usuarios de test
+TOP_K = 50  # tamano de la lista de recomendaciones por usuario
+MIN_TEST_RATINGS = 5  # incluir todos los usuarios con al menos 5 ratings en test
+UMBRAL_REC = 3.5  # umbral para considerar un item recomendado relevante
+UMBRAL_TEST = 3.5  # umbral para considerar un item de test relevante
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 FIG_DIR = OUTPUT_DIR / "figures"
@@ -87,7 +88,9 @@ def load_data():
     return movies_df, train_df, test_df, user_registry
 
 
-def build_recommenders(movies_df: pd.DataFrame, train_df: pd.DataFrame, user_registry: dict):
+def build_recommenders(
+    movies_df: pd.DataFrame, train_df: pd.DataFrame, user_registry: dict
+):
     print("[+] Construyendo recomendador BC...")
     content = ContentBasedRecommender(
         categorical_columns=["generos"],
@@ -121,10 +124,14 @@ def _score_to_rating(score: float) -> float:
 
 
 def recommend_bc(model, user_id: int, top_k: int) -> List[Tuple[int, float]]:
-    df = model.recommend(user_id=user_id, top_k=top_k, exclude_seen=True, return_df=True)
+    df = model.recommend(
+        user_id=user_id, top_k=top_k, exclude_seen=True, return_df=True
+    )
     if df is None or len(df) == 0:
         return []
-    return [(int(r["movie_id"]), _score_to_rating(r["score"])) for _, r in df.iterrows()]
+    return [
+        (int(r["movie_id"]), _score_to_rating(r["score"])) for _, r in df.iterrows()
+    ]
 
 
 def recommend_col(model, user_id: int, top_k: int) -> List[Tuple[int, float]]:
@@ -154,7 +161,11 @@ def precision_recall_f1(recs: List[Tuple[int, float]], test_ratings: Dict[int, f
     inter = rec_relevantes & test_relevantes
     precision = len(inter) / len(rec_relevantes) if rec_relevantes else 0.0
     recall = len(inter) / len(test_relevantes) if test_relevantes else 0.0
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    f1 = (
+        (2 * precision * recall / (precision + recall))
+        if (precision + recall) > 0
+        else 0.0
+    )
     return precision, recall, f1
 
 
@@ -193,10 +204,13 @@ def ndcg(recs: List[Tuple[int, float]], test_ratings: Dict[int, float]) -> float
 # ---------------------------------------------------------------------------
 # Bucle principal de evaluacion
 # ---------------------------------------------------------------------------
-def select_users(test_df: pd.DataFrame, registry_user_ids: set, n, seed: int) -> List[int]:
+def select_users(
+    test_df: pd.DataFrame, registry_user_ids: set, n, seed: int
+) -> List[int]:
     counts = test_df.groupby("userId").size()
     candidates = [
-        int(uid) for uid, c in counts.items()
+        int(uid)
+        for uid, c in counts.items()
         if c >= MIN_TEST_RATINGS and str(uid) in registry_user_ids
     ]
     if n is None:
@@ -237,17 +251,19 @@ def evaluate():
             p, r, f1 = precision_recall_f1(recs, test_ratings)
             m = mae(recs, test_ratings)
             nd = ndcg(recs, test_ratings)
-            rows.append({
-                "userId": uid,
-                "SR": sr_name,
-                "n_recomendados": len(recs),
-                "n_test": len(test_ratings),
-                "precision": p,
-                "recall": r,
-                "f1": f1,
-                "mae": m,
-                "ndcg": nd,
-            })
+            rows.append(
+                {
+                    "userId": uid,
+                    "SR": sr_name,
+                    "n_recomendados": len(recs),
+                    "n_test": len(test_ratings),
+                    "precision": p,
+                    "recall": r,
+                    "f1": f1,
+                    "mae": m,
+                    "ndcg": nd,
+                }
+            )
 
     return pd.DataFrame(rows), users
 
@@ -260,7 +276,9 @@ SR_COLORS = {"BC": "#1f77b4", "Col": "#d62728", "Hibrido": "#2ca02c"}
 
 
 def _pivot(df: pd.DataFrame, metric: str) -> pd.DataFrame:
-    return df.pivot(index="userId", columns="SR", values=metric).reindex(columns=SR_NAMES)
+    return df.pivot(index="userId", columns="SR", values=metric).reindex(
+        columns=SR_NAMES
+    )
 
 
 def _setup_user_axis(ax, user_ids):
@@ -285,9 +303,30 @@ def plot_per_sr(df: pd.DataFrame):
         fig, ax = plt.subplots(figsize=(12, 5))
         x = _setup_user_axis(ax, user_ids)
         marker_size = 3 if len(user_ids) > 50 else 5
-        ax.plot(x, sub["precision"].values, marker="o", markersize=marker_size, label="Precision", linewidth=1)
-        ax.plot(x, sub["recall"].values, marker="s", markersize=marker_size, label="Recall", linewidth=1)
-        ax.plot(x, sub["f1"].values, marker="^", markersize=marker_size, label="F1", linewidth=1)
+        ax.plot(
+            x,
+            sub["precision"].values,
+            marker="o",
+            markersize=marker_size,
+            label="Precision",
+            linewidth=1,
+        )
+        ax.plot(
+            x,
+            sub["recall"].values,
+            marker="s",
+            markersize=marker_size,
+            label="Recall",
+            linewidth=1,
+        )
+        ax.plot(
+            x,
+            sub["f1"].values,
+            marker="^",
+            markersize=marker_size,
+            label="F1",
+            linewidth=1,
+        )
         ax.set_title(f"Precision / Recall / F1 - SR {sr} ({len(user_ids)} usuarios)")
         ax.set_xlabel("Usuario")
         ax.set_ylabel("Valor")
@@ -299,7 +338,9 @@ def plot_per_sr(df: pd.DataFrame):
         plt.close(fig)
 
 
-def plot_per_metric(df: pd.DataFrame, metric: str, ylabel: str, fname: str, ylim=(0, 1)):
+def plot_per_metric(
+    df: pd.DataFrame, metric: str, ylabel: str, fname: str, ylim=(0, 1)
+):
     """Graficas 4-6 (y MAE/nDCG): una por metrica con lineas para cada SR."""
     pivot = _pivot(df, metric)
     user_ids = pivot.index.tolist()
@@ -308,8 +349,15 @@ def plot_per_metric(df: pd.DataFrame, metric: str, ylabel: str, fname: str, ylim
     marker_size = 3 if len(user_ids) > 50 else 5
     for sr in SR_NAMES:
         if sr in pivot.columns:
-            ax.plot(x, pivot[sr].values, marker="o", markersize=marker_size, linewidth=1,
-                    label=sr, color=SR_COLORS[sr])
+            ax.plot(
+                x,
+                pivot[sr].values,
+                marker="o",
+                markersize=marker_size,
+                linewidth=1,
+                label=sr,
+                color=SR_COLORS[sr],
+            )
     ax.set_title(f"{ylabel} por usuario ({len(user_ids)} usuarios)")
     ax.set_xlabel("Usuario")
     ax.set_ylabel(ylabel)
@@ -330,12 +378,18 @@ def make_plots(df: pd.DataFrame):
     # MAE: escala dependiente del rating
     mae_pivot = _pivot(df, "mae")
     max_mae = float(np.nanmax(mae_pivot.values)) if mae_pivot.size else 1.0
-    plot_per_metric(df, "mae", "MAE", "05_MAE_comparativa.png", ylim=(0, max(1.0, max_mae * 1.1)))
+    plot_per_metric(
+        df, "mae", "MAE", "05_MAE_comparativa.png", ylim=(0, max(1.0, max_mae * 1.1))
+    )
     plot_per_metric(df, "ndcg", "nDCG", "06_nDCG_comparativa.png")
 
 
 def write_excel(df: pd.DataFrame):
-    avg = df.groupby("SR")[["precision", "recall", "f1", "mae", "ndcg"]].mean().reindex(SR_NAMES)
+    avg = (
+        df.groupby("SR")[["precision", "recall", "f1", "mae", "ndcg"]]
+        .mean()
+        .reindex(SR_NAMES)
+    )
     avg = avg.rename_axis("SR").reset_index()
 
     excel_path = OUTPUT_DIR / "evaluacion_SR.xlsx"
